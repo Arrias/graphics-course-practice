@@ -122,18 +122,6 @@ vec2 bezier(std::vector<vertex> const &vertices, float t) {
 
 // bond between vao and vbo
 class PointHolder : public std::vector<vertex> {
-    GLuint vao, vbo;
-
-public:
-    GLuint getVao() const {
-        return vao;
-    }
-
-    GLuint getVbo() const {
-        return vbo;
-    }
-
-    PointHolder(GLuint vao, GLuint vbo) : vao(vao), vbo(vbo) {
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBindVertexArray(vao);
         glEnableVertexAttribArray(0);
@@ -149,41 +137,17 @@ public:
     }
 };
 
+=======
+>>>>>>> Add practice 3 1-5 tasks
 int main() try {
-    if (SDL_Init(SDL_INIT_VIDEO) != 0)
-        sdl2_fail("SDL_Init: ");
 
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
-
-    SDL_Window *window = SDL_CreateWindow("Graphics course practice 3",
                                           SDL_WINDOWPOS_CENTERED,
-                                          SDL_WINDOWPOS_CENTERED,
-                                          800, 600,
                                           SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
-    if (!window)
-        sdl2_fail("SDL_CreateWindow: ");
-
-    int width, height;
-    SDL_GetWindowSize(window, &width, &height);
-
-    SDL_GLContext gl_context = SDL_GL_CreateContext(window);
-    if (!gl_context)
         sdl2_fail("SDL_GL_CreateContext: ");
 
-    SDL_GL_SetSwapInterval(0);
 
-    if (auto result = glewInit(); result != GLEW_NO_ERROR)
-        glew_fail("glewInit: ", result);
-
-    if (!GLEW_VERSION_3_3)
-        throw std::runtime_error("OpenGL 3.3 is not supported");
-
-    glClearColor(0.8f, 0.8f, 1.f, 0.f);
 
     auto vertex_shader = create_shader(GL_VERTEX_SHADER, vertex_shader_source);
     auto fragment_shader = create_shader(GL_FRAGMENT_SHADER, fragment_shader_source);
@@ -293,6 +257,10 @@ int main() try {
 
         glUseProgram(program);
         glUniformMatrix4fv(view_location, 1, GL_TRUE, view);
+        glLineWidth(5.f);
+        glPointSize(10);
+        glDrawArrays(GL_LINE_STRIP, 0, (GLsizei) v.size());
+        glDrawArrays(GL_POINTS, 0, (GLsizei) v.size());
 
         glBindVertexArray(curve_holder.getVao());
         glDrawArrays(GL_LINE_STRIP, 0, (GLsizei) curve_holder.size());
