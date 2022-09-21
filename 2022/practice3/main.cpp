@@ -14,6 +14,8 @@
 #include <iostream>
 #include <chrono>
 #include <vector>
+#include <tuple>
+#include <utility>
 
 const char vertex_shader_source[] =
         R"(#version 330 core
@@ -118,6 +120,35 @@ vec2 bezier(std::vector<vertex> const &vertices, float t) {
     return points[0];
 }
 
+// bond between vao and vbo
+class PointHolder : public std::vector<vertex> {
+    GLuint vao, vbo;
+
+public:
+    GLuint getVao() const {
+        return vao;
+    }
+
+    GLuint getVbo() const {
+        return vbo;
+    }
+
+    PointHolder(GLuint vao, GLuint vbo) : vao(vao), vbo(vbo) {
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBindVertexArray(vao);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *) nullptr);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(vertex), (void *) (sizeof(float) * 2));
+    }
+
+    // reinit vbo
+    void bind() {
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertex) * size(), data(), GL_STATIC_DRAW);
+    }
+};
+
 int main() try {
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
         sdl2_fail("SDL_Init: ");
@@ -162,34 +193,38 @@ int main() try {
 
     //auto triangle = get_triangle_vertices(width, height);
 
-    std::vector<vertex> v;
-    GLuint vbo;
-    glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    std::vector<vertex> curve_vertexes;
+    std::vector<vertex> bezier_vertexes;
 
-    auto update_vbo = [&]() {
-        glBindBuffer(GL_ARRAY_BUFFER, vbo);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertex) * v.size(), &v[0], GL_STATIC_DRAW);
-    };
+    GLuint vbo_s[2];
+    GLuint vao_s[2];
 
-/*    vertex test;
-    glGetBufferSubData(GL_ARRAY_BUFFER, sizeof(vertex), sizeof(vertex), &test);
-    std::cout << "test pos = " << test.position.x << " " << test.position.y << std::endl;
-    std::cout << "test color = " << (int) test.color[0] << " " << (int) test.color[1] << " " << (int) test.color[2] << " "
-              << (int) test.color[3] << std::endl;*/
+    glGenVertexArrays(2, vao_s);
+    glGenBuffers(2, vbo_s);
+    glLineWidth(5.f);
+    glPointSize(10);
 
-    GLuint vao;
-    glGenVertexArrays(1, &vao);
-    glBindVertexArray(vao);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *) nullptr);
+    PointHolder curve_holder(vao_s[0], vbo_s[0]);
+    PointHolder bezier_holder(vao_s[1], vbo_s[1]);
 
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(vertex), (void *) (sizeof(float) * 2));
-
+    int quality = 4;
     auto last_frame_start = std::chrono::high_resolution_clock::now();
     float time = 0.f;
     bool running = true;
+
+    auto build_bezier = [&bezier_holder, &curve_holder, &quality]() {
+        bezier_holder.clear();
+        if (curve_holder.size() < 2) return;
+
+        float step = 1.f / (((float) curve_holder.size() - 1) * (float) quality);
+        std::cout << "step = " << step << std::endl;
+
+        float t = 0;
+        for (int i = 0; i < (curve_holder.size() - 1) * quality + 1; ++i) {
+            bezier_holder.push_back({bezier(curve_holder, t), {255, 0, 0, 0}});
+            t += step;
+        }
+    };
 
     while (running) {
         for (SDL_Event event; SDL_PollEvent(&event);)
@@ -210,23 +245,31 @@ int main() try {
                     if (event.button.button == SDL_BUTTON_LEFT) {
                         int mouse_x = event.button.x;
                         int mouse_y = event.button.y;
-                        std::cout << mouse_x << " " << mouse_y << std::endl;
-                        v.push_back({(float) mouse_x, (float) mouse_y, {255, 0, 0, 1}});
-                        update_vbo();
+                        curve_holder.push_back({(float) mouse_x, (float) mouse_y, {0, 0, 0, 1}});
+                        curve_holder.bind();
+                        build_bezier();
+                        bezier_holder.bind();
                     } else if (event.button.button == SDL_BUTTON_RIGHT) {
                         int mouse_x = event.button.x;
                         int mouse_y = event.button.y;
-                        if (!v.empty()) {
-                            v.pop_back();
+                        if (!curve_holder.empty()) {
+                            curve_holder.pop_back();
+                            build_bezier();
+                            bezier_holder.bind();
                         }
                     }
                     break;
                 case SDL_KEYDOWN:
                     if (event.key.keysym.sym == SDLK_LEFT) {
-
+                        quality = std::max(quality - 1, 1);
+                        build_bezier();
+                        bezier_holder.bind();
                     } else if (event.key.keysym.sym == SDLK_RIGHT) {
-
+                        ++quality;
+                        build_bezier();
+                        bezier_holder.bind();
                     }
+                    std::cout << "quality = " << quality << std::endl;
                     break;
             }
 
@@ -250,10 +293,13 @@ int main() try {
 
         glUseProgram(program);
         glUniformMatrix4fv(view_location, 1, GL_TRUE, view);
-        glLineWidth(5.f);
-        glPointSize(10);
-        glDrawArrays(GL_LINE_STRIP, 0, (GLsizei) v.size());
-        glDrawArrays(GL_POINTS, 0, (GLsizei) v.size());
+
+        glBindVertexArray(curve_holder.getVao());
+        glDrawArrays(GL_LINE_STRIP, 0, (GLsizei) curve_holder.size());
+        glDrawArrays(GL_POINTS, 0, (GLsizei) curve_holder.size());
+
+        glBindVertexArray(bezier_holder.getVao());
+        glDrawArrays(GL_LINE_STRIP, 0, (GLsizei) bezier_holder.size());
 
         SDL_GL_SwapWindow(window);
     }
