@@ -138,7 +138,7 @@ class PointHolder : public std::vector<vertex> {
 };
 
 =======
->>>>>>> Add practice 3 1-5 tasks
+>>>>>>> Add practice3 tasks 6-7
 int main() try {
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -257,10 +257,13 @@ int main() try {
 
         glUseProgram(program);
         glUniformMatrix4fv(view_location, 1, GL_TRUE, view);
-        glLineWidth(5.f);
-        glPointSize(10);
-        glDrawArrays(GL_LINE_STRIP, 0, (GLsizei) v.size());
-        glDrawArrays(GL_POINTS, 0, (GLsizei) v.size());
+
+        glBindVertexArray(curve_holder.getVao());
+        glDrawArrays(GL_LINE_STRIP, 0, (GLsizei) curve_holder.size());
+        glDrawArrays(GL_POINTS, 0, (GLsizei) curve_holder.size());
+
+        glBindVertexArray(bezier_holder.getVao());
+        glDrawArrays(GL_LINE_STRIP, 0, (GLsizei) bezier_holder.size());
 
         glBindVertexArray(curve_holder.getVao());
         glDrawArrays(GL_LINE_STRIP, 0, (GLsizei) curve_holder.size());
