@@ -6,12 +6,10 @@
 #include <stdexcept>
 #include <map>
 
-namespace
-{
+namespace {
 
-    template <typename ... Args>
-    std::string to_string(Args const & ... args)
-    {
+    template<typename ... Args>
+    std::string to_string(Args const &... args) {
         std::ostringstream os;
         (os << ... << args);
         return os.str();
@@ -19,8 +17,7 @@ namespace
 
 }
 
-obj_data parse_obj(std::filesystem::path const & path)
-{
+obj_data parse_obj(std::filesystem::path const &path) {
     std::ifstream is(path);
 
     std::vector<std::array<float, 3>> positions;
@@ -34,12 +31,11 @@ obj_data parse_obj(std::filesystem::path const & path)
     std::string line;
     std::size_t line_count = 0;
 
-    auto fail = [&](auto const & ... args){
+    auto fail = [&](auto const &... args) {
         throw std::runtime_error(to_string("Error parsing OBJ data, line ", line_count, ": ", args...));
     };
 
-    while (std::getline(is >> std::ws, line))
-    {
+    while (std::getline(is >> std::ws, line)) {
         ++line_count;
 
         if (line.empty()) continue;
@@ -51,27 +47,19 @@ obj_data parse_obj(std::filesystem::path const & path)
         std::string tag;
         ls >> tag;
 
-        if (tag == "v")
-        {
-            auto & p = positions.emplace_back();
+        if (tag == "v") {
+            auto &p = positions.emplace_back();
             ls >> p[0] >> p[1] >> p[2];
-        }
-        else if (tag == "vn")
-        {
-            auto & n = normals.emplace_back();
+        } else if (tag == "vn") {
+            auto &n = normals.emplace_back();
             ls >> n[0] >> n[1] >> n[2];
-        }
-        else if (tag == "vt")
-        {
-            auto & t = texcoords.emplace_back();
+        } else if (tag == "vt") {
+            auto &t = texcoords.emplace_back();
             ls >> t[0] >> t[1];
-        }
-        else if (tag == "f")
-        {
+        } else if (tag == "f") {
             std::vector<std::uint32_t> vertices;
 
-            while (ls)
-            {
+            while (ls) {
                 std::array<std::uint32_t, 3> index{0, 0, 0};
 
                 ls >> index[0];
@@ -79,19 +67,16 @@ obj_data parse_obj(std::filesystem::path const & path)
                 if (!ls)
                     fail("expected position index");
 
-                if (!std::isspace(ls.peek()) && !ls.eof())
-                {
+                if (!std::isspace(ls.peek()) && !ls.eof()) {
                     if (ls.get() != '/')
                         fail("expected '/'");
 
-                    if (ls.peek() != '/')
-                    {
+                    if (ls.peek() != '/') {
                         ls >> index[1];
                         if (!ls)
                             fail("expected texcoord index");
 
-                        if (!std::isspace(ls.peek()) && !ls.eof())
-                        {
+                        if (!std::isspace(ls.peek()) && !ls.eof()) {
                             if (ls.get() != '/')
                                 fail("expected '/'");
 
@@ -99,9 +84,7 @@ obj_data parse_obj(std::filesystem::path const & path)
                             if (!ls)
                                 fail("expected normal index");
                         }
-                    }
-                    else
-                    {
+                    } else {
                         ls.get();
 
                         ls >> index[2];
@@ -124,11 +107,10 @@ obj_data parse_obj(std::filesystem::path const & path)
                     fail("bad normal index (", index[2], ")");
 
                 auto it = index_map.find(index);
-                if (it == index_map.end())
-                {
+                if (it == index_map.end()) {
                     it = index_map.insert({index, result.vertices.size()}).first;
 
-                    auto & v = result.vertices.emplace_back();
+                    auto &v = result.vertices.emplace_back();
 
                     v.position = positions[index[0]];
 
@@ -146,8 +128,7 @@ obj_data parse_obj(std::filesystem::path const & path)
                 vertices.push_back(it->second);
             }
 
-            for (std::size_t i = 1; i + 1 < vertices.size(); ++i)
-            {
+            for (std::size_t i = 1; i + 1 < vertices.size(); ++i) {
                 result.indices.push_back(vertices[0]);
                 result.indices.push_back(vertices[i]);
                 result.indices.push_back(vertices[i + 1]);
