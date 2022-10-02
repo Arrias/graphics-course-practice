@@ -22,9 +22,8 @@ endif ()
 
 set(TARGET_NAME "${PROJECT_NAME}")
 
-add_executable(${TARGET_NAME} main.cpp)
-include_directories(utils)
-include_directories(GLWorkers)
+add_executable(${TARGET_NAME} main.cpp include/Vec2.cpp include/Color.cpp include/Timer.cpp include/util.cpp include/PointsHolder.cpp include/Grid.cpp include/Grid.hpp include/Circle.cpp include/Circle.hpp)
+include_directories(include)
 
 target_include_directories(${TARGET_NAME} PUBLIC
         "${SDL2_INCLUDE_DIRS}"
