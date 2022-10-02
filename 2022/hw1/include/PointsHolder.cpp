@@ -10,15 +10,15 @@ PointsHolder::PointsHolder() {
 }
 
 void PointsHolder::updColors() const {
-    bindData(GL_ARRAY_BUFFER, colors_vbo, colors);
+    bindData(GL_ARRAY_BUFFER, colors_vbo, vao, colors);
 }
 
 void PointsHolder::updPoints() const {
-    bindData(GL_ARRAY_BUFFER, points_vbo, points);
+    bindData(GL_ARRAY_BUFFER, points_vbo, vao, points);
 }
 
 void PointsHolder::updIndexes() const {
-    bindData(GL_ELEMENT_ARRAY_BUFFER, ebo, ids);
+    bindData(GL_ELEMENT_ARRAY_BUFFER, ebo, vao, ids);
 }
 
 size_t PointsHolder::size() const {

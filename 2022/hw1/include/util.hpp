@@ -35,7 +35,8 @@ void SDL_init(SDL_Window *&window, SDL_GLContext &gl_context);
 void gen_view_matrix(float *m, float width, float height);
 
 template<class T>
-void bindData(GLuint array_type, GLuint vbo, const std::vector<T> &vec) {
+void bindData(GLuint array_type, GLuint vbo, GLuint vao, const std::vector<T> &vec) {
+    glBindVertexArray(vao);
     glBindBuffer(array_type, vbo);
     glBufferData(array_type, sizeof(T) * vec.size(), vec.data(), GL_STATIC_DRAW);
 }
