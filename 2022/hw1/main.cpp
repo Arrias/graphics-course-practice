@@ -9,29 +9,13 @@
 #include "PointsHolder.hpp"
 #include "Timer.hpp"
 
-void gen_view_matrix(float *m, float width, float height) {
-    float view[16] = {
-            2.f / (float) width, 0.f, 0.f, -1.f,
-            0.f, -2.f / (float) height, 0.f, 1.f,
-            0.f, 0.f, 1.f, 0.f,
-            0.f, 0.f, 0.f, 1.f,
-    };
-    memcpy(m, view, sizeof(float) * 16);
-}
+void gen_view_matrix(float *m, float width, float height);
 
 template<class T>
-void bindData(GLuint array_type, GLuint vbo, const std::vector<T> &vec) {
-    glBindBuffer(array_type, vbo);
-    glBufferData(array_type, sizeof(T) * vec.size(), vec.data(), GL_STATIC_DRAW);
-}
+void bindData(GLuint array_type, GLuint vbo, const std::vector<T> &vec);
 
 template<class T>
-void bindArgument(GLuint array_type, GLuint vbo, GLuint vao, size_t arg, GLint size, GLenum type, GLboolean norm, const GLvoid *pointer) {
-    glBindVertexArray(vao);
-    glBindBuffer(array_type, vbo);
-    glEnableVertexAttribArray(arg);
-    glVertexAttribPointer(arg, size, type, norm, sizeof(T), pointer);
-}
+void bindArgument(GLuint array_type, GLuint vbo, GLuint vao, size_t arg, GLint size, GLenum type, GLboolean norm, const GLvoid *pointer);
 
 struct Timer {
     std::chrono::time_point<std::chrono::high_resolution_clock> last_frame_start = std::chrono::high_resolution_clock::now();
@@ -92,7 +76,7 @@ struct Grid : public PointsHolder {
 
         for (int i = 0; i < n; ++i) {
             for (int j = 0; j < m; ++j) {
-                points.push_back({(float) i * shift_x, (float) j * shift_y});
+                points.emplace_back((float) i * shift_x, (float) j * shift_y);
                 if (i + 1 < n && j + 1 < m) {
                     // triangulation
                     ids.push_back(get_id(i, j));
@@ -119,56 +103,44 @@ struct Grid : public PointsHolder {
     }
 };
 
-const uint32_t COLOR_BASE = 256;
-const uint32_t COLORS_CNT = COLOR_BASE * COLOR_BASE * COLOR_BASE;
-
-Color get_color_by_number(uint32_t num) {
-    Color ret;
-    for (int i = 0; i < 3; ++i) {
-        ret.data[i] = num % COLOR_BASE;
-        num /= COLOR_BASE;
-    }
-    return ret;
+int getRnd(int l, int r) {
+    return (int) (rnd() % (r - l + 1) + l);
 }
 
-int getRnd(int l, int r) {
-    return rnd() % (r - l + 1) + l;
+float floatRnd(int l, int r) {
+    return (float) getRnd(l, r);
 }
 
 const auto sq2 = (float) sqrt(2);
 const std::vector<Vec2> directions = {
-        //{0.f,  1.f},
+        {0.f,  1.f},
         {sq2,  sq2},
-        // {1.f,  0.f},
+        {1.f,  0.f},
         {sq2,  -sq2},
-        //  {0.f,  -1.f},
+        {0.f,  -1.f},
         {-sq2, -sq2},
-        //  {-1.f, 0.f},
+        {-1.f, 0.f},
         {-sq2, sq2},
 };
 
 struct Circle {
-    Vec2 c;
-    float r;
-    Vec2 dir;
-    int potencial;
+    Vec2 center, direction;
+    float radius;
+    float r, g, b;
 
-    bool is_lie(Vec2 pos) const {
-        return sqr(pos.x - c.x) + sqr(pos.y - c.y) <= r * r;
+    Circle(Vec2 center, Vec2 direction, float radius, float r, float g, float b) :
+            center(center), direction(direction), radius(radius), r(r), g(g), b(b) {}
+
+    float f(Vec2 pos) const {
+        return sqr(radius) / (pos - center).square_len();
     }
 
     void move(float time, float width, float height) {
-        c = c + time * dir;
-        potencial--;
-        if (c.x <= 0 || c.y <= 0 || c.x >= width || c.y >= height) {
-            c = c - 2 * time * dir;
-            float xx = dir.x;
-            float yy = dir.y;
-            dir = {-yy, xx};
-            potencial = getRnd(10, 100);
-        } else if (potencial == 0) {
-            dir = directions[getRnd(0, (int) directions.size() - 1)];
-            potencial = getRnd(10, 100);
+        center = center + time * direction;
+        if (center.x <= 0 || center.y <= 0 || center.x >= width || center.y >= height) {
+            center = center - 2 * time * direction;
+            direction.move90();
+            direction.move90();
         }
     }
 };
