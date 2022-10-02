@@ -9,6 +9,170 @@
 #include "PointsHolder.hpp"
 #include "Timer.hpp"
 
+void gen_view_matrix(float *m, float width, float height) {
+    float view[16] = {
+            2.f / (float) width, 0.f, 0.f, -1.f,
+            0.f, -2.f / (float) height, 0.f, 1.f,
+            0.f, 0.f, 1.f, 0.f,
+            0.f, 0.f, 0.f, 1.f,
+    };
+    memcpy(m, view, sizeof(float) * 16);
+}
+
+template<class T>
+void bindData(GLuint array_type, GLuint vbo, const std::vector<T> &vec) {
+    glBindBuffer(array_type, vbo);
+    glBufferData(array_type, sizeof(T) * vec.size(), vec.data(), GL_STATIC_DRAW);
+}
+
+template<class T>
+void bindArgument(GLuint array_type, GLuint vbo, GLuint vao, size_t arg, GLint size, GLenum type, GLboolean norm, const GLvoid *pointer) {
+    glBindVertexArray(vao);
+    glBindBuffer(array_type, vbo);
+    glEnableVertexAttribArray(arg);
+    glVertexAttribPointer(arg, size, type, norm, sizeof(T), pointer);
+}
+
+struct Timer {
+    std::chrono::time_point<std::chrono::high_resolution_clock> last_frame_start = std::chrono::high_resolution_clock::now();
+    float time = 0.f;
+
+    float tick() {
+        auto now = std::chrono::high_resolution_clock::now();
+        float dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - last_frame_start).count();
+        last_frame_start = now;
+        time += dt;
+        return dt;
+    }
+};
+
+struct PointsHolder {
+    std::vector<Vec2> points;
+    std::vector<Color> colors;
+    std::vector<uint32_t> ids;
+    GLuint points_vbo{}, colors_vbo{}, vao{}, ebo{};
+
+    PointsHolder() {
+        glGenVertexArrays(1, &vao);
+        glGenBuffers(1, &points_vbo);
+        glGenBuffers(1, &colors_vbo);
+        glGenBuffers(1, &ebo);
+        bindArgument<Vec2>(GL_ARRAY_BUFFER, points_vbo, vao, 0, 2, GL_FLOAT, GL_FALSE, (void *) nullptr);
+        bindArgument<Color>(GL_ARRAY_BUFFER, colors_vbo, vao, 1, 4, GL_UNSIGNED_BYTE, GL_TRUE, (void *) nullptr);
+    }
+
+    void updColors() const {
+        bindData(GL_ARRAY_BUFFER, colors_vbo, colors);
+    }
+
+    void updPoints() const {
+        bindData(GL_ARRAY_BUFFER, points_vbo, points);
+    }
+
+    void updIndexes() const {
+        bindData(GL_ELEMENT_ARRAY_BUFFER, ebo, ids);
+    }
+
+    size_t size() const {
+        return ids.size();
+    }
+};
+
+struct Grid : public PointsHolder {
+    void build(int n, int m, int width, int height) {
+        points.clear();
+        ids.clear();
+
+        float shift_x = (float) width / (float) (n - 1);
+        float shift_y = (float) height / (float) (m - 1);
+
+        auto get_id = [&n, &m](int i, int j) {
+            return i * m + j;
+        };
+
+        for (int i = 0; i < n; ++i) {
+            for (int j = 0; j < m; ++j) {
+                points.push_back({(float) i * shift_x, (float) j * shift_y});
+                if (i + 1 < n && j + 1 < m) {
+                    // triangulation
+                    ids.push_back(get_id(i, j));
+                    ids.push_back(get_id(i + 1, j));
+                    ids.push_back(get_id(i, j + 1));
+
+                    ids.push_back(get_id(i + 1, j));
+                    ids.push_back(get_id(i, j + 1));
+                    ids.push_back(get_id(i + 1, j + 1));
+                }
+            }
+        }
+
+        colors.resize(points.size());
+        updPoints();
+        updIndexes();
+    }
+
+    void apply(std::function<Color(Vec2)> &&point_to_color) {
+        for (int i = 0; auto &color: colors) {
+            color = point_to_color(points[i++]);
+        }
+        updColors();
+    }
+};
+
+const uint32_t COLOR_BASE = 256;
+const uint32_t COLORS_CNT = COLOR_BASE * COLOR_BASE * COLOR_BASE;
+
+Color get_color_by_number(uint32_t num) {
+    Color ret;
+    for (int i = 0; i < 3; ++i) {
+        ret.data[i] = num % COLOR_BASE;
+        num /= COLOR_BASE;
+    }
+    return ret;
+}
+
+int getRnd(int l, int r) {
+    return rnd() % (r - l + 1) + l;
+}
+
+const auto sq2 = (float) sqrt(2);
+const std::vector<Vec2> directions = {
+        //{0.f,  1.f},
+        {sq2,  sq2},
+        // {1.f,  0.f},
+        {sq2,  -sq2},
+        //  {0.f,  -1.f},
+        {-sq2, -sq2},
+        //  {-1.f, 0.f},
+        {-sq2, sq2},
+};
+
+struct Circle {
+    Vec2 c;
+    float r;
+    Vec2 dir;
+    int potencial;
+
+    bool is_lie(Vec2 pos) const {
+        return sqr(pos.x - c.x) + sqr(pos.y - c.y) <= r * r;
+    }
+
+    void move(float time, float width, float height) {
+        c = c + time * dir;
+        potencial--;
+        if (c.x <= 0 || c.y <= 0 || c.x >= width || c.y >= height) {
+            c = c - 2 * time * dir;
+            float xx = dir.x;
+            float yy = dir.y;
+            dir = {-yy, xx};
+            potencial = getRnd(10, 100);
+        } else if (potencial == 0) {
+            dir = directions[getRnd(0, (int) directions.size() - 1)];
+            potencial = getRnd(10, 100);
+        }
+    }
+};
+
 int main(int argc, char **argv) try {
     // init
     SDL_Window *window = nullptr;
