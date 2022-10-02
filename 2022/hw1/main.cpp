@@ -1,14 +1,6 @@
-#include <string_view>
-#include <stdexcept>
 #include <iostream>
-#include <vector>
-#include <functional>
-#include <climits>
-#include <chrono>
-#include <random>
-#include <cassert>
 
-#include "Grid.hpp"
+#include "Graph.hpp"
 #include "util.hpp"
 #include "shaders.hpp"
 #include "constants.hpp"
@@ -44,8 +36,9 @@ int main(int argc, char **argv) try {
     };
 
     std::vector<Circle> circles;
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < 1; ++i) {
         auto center = get_rand_cord(20);
+        auto direction = directions[getRnd(0, (int) directions.size() - 1)];
         auto coefficient_r = (float) getRnd(0, 1);
         auto coefficient_g = (float) getRnd(0, 1);
         if (equal(coefficient_g + coefficient_r, 0.0)) {
@@ -54,18 +47,18 @@ int main(int argc, char **argv) try {
         coefficient_r *= 10.f;
         coefficient_g *= 10.f;
         std::mt19937 rnd(std::chrono::steady_clock::now().time_since_epoch().count());
-        auto new_circle = Circle(center, directions[rnd() % directions.size()], 20.f, coefficient_r, coefficient_g, 0.f);
+
+        auto alter = Vec2{float(width) / 2, float(height) / 2};
+        auto new_circle = Circle(alter, Vec2{0, 0}, (float) getRnd(60, 100), 1.f, 0.f, 0.f);
         circles.push_back(new_circle);
     }
 
-    int grid_n = 100;
-    int grid_m = 100;
-    Grid grid;
-    grid.build(grid_n, grid_m, width, height);
+    int grid_n = 50;
+    int grid_m = 50;
+    Graph graph(grid_n, grid_m, width, height);
 
     const std::vector<std::pair<float, unsigned>> limits = {
             {0.0,  0u},
-            {1.f,  120u},
             {1.5,  170u},
             {2.f,  190u},
             {2.5,  220u},
@@ -74,7 +67,6 @@ int main(int argc, char **argv) try {
     };
 
     auto get_component = [&](float dst) {
-        if (lesser(dst, 0.5f)) return 1u;
         dst = std::min(dst, limits.back().first - 1000);
 
         for (int i = 1; i < limits.size(); ++i) {
@@ -86,8 +78,11 @@ int main(int argc, char **argv) try {
             }
         }
 
-        assert(false);
+        throw std::runtime_error("get_component didn't return any");
     };
+
+    float C = 0.8;
+    std::vector<float> consts_for_lines = {C};
 
     Timer timer;
     bool running = true;
@@ -99,17 +94,24 @@ int main(int argc, char **argv) try {
                     break;
                 case SDL_KEYDOWN:
                     auto sym = event.key.keysym.sym;
+
+                    if (sym == SDLK_1) {
+                        consts_for_lines.push_back(C);
+                    }
+                    if (sym == SDLK_RIGHT || sym == SDLK_LEFT) {
+                        if (sym == SDLK_RIGHT) C += 0.1;
+                        else C -= 0.1;
+                        std::cout << "C = " << C << std::endl;
+                        break;
+                    }
+
                     if (sym != SDLK_DOWN && sym != SDLK_UP) break;
                     auto grid_delta = GridQuantityDelta;
                     if (sym == SDLK_DOWN) grid_delta *= -1;
 
                     grid_n += grid_delta;
                     grid_m += grid_delta;
-                    grid.build(grid_n, grid_m, GridWidth, GridHeight);
-            }
-            if (event.type == SDL_QUIT) {
-                running = false;
-                break;
+                    graph.buildGrid(grid_n, grid_m, GridWidth, GridHeight);
             }
         }
         if (!running) {
@@ -122,10 +124,10 @@ int main(int argc, char **argv) try {
         auto dt = timer.tick();
 
         for (auto &circle: circles) {
-            circle.move(dt * 50.f, GridWidth, GridHeight);
+            circle.move(dt * 100.f, GridWidth, GridHeight);
         }
 
-        grid.apply(std::function<Color(Vec2)>([&timer, &circles, &get_component](Vec2 pos) {
+        graph.apply(std::function<float(Vec2, Color &)>([&timer, &circles, &get_component](Vec2 pos, Color &color) {
             float r_dst = 0, g_dst = 0, b_dst = 0, dst = 0;
             for (Circle &circle: circles) {
                 float add = circle.f(pos);
@@ -134,21 +136,25 @@ int main(int argc, char **argv) try {
                 b_dst += circle.b * add;
                 dst += add;
             }
-            Color ret;
-            if (lesser(dst, 1.0)) return ret;
-            ret.data[0] = get_component(r_dst);
-            ret.data[1] = get_component(g_dst);
-            ret.data[2] = get_component(b_dst);
-            return ret;
+            color = Color();
+            if (!lesser(dst, 1.0)) {
+                color.data[0] = get_component(r_dst);
+                color.data[1] = get_component(g_dst);
+                color.data[2] = get_component(b_dst);
+            }
+            return dst;
         }));
+
+        for (auto line: consts_for_lines) {
+            graph.addLine(line);
+        }
 
         glClear(GL_COLOR_BUFFER_BIT);
 
         // set uniform
         glUniformMatrix4fv((GLint) view_location, 1, GL_TRUE, view);
 
-        glBindVertexArray(grid.vao);
-        glDrawElements(GL_TRIANGLES, (GLsizei) grid.size(), GL_UNSIGNED_INT, (void *) nullptr);
+        graph.draw();
         SDL_GL_SwapWindow(window);
     }
 
