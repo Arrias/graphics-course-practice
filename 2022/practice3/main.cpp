@@ -29,7 +29,7 @@ out vec4 color;
 
 void main()
 {
-    gl_Position = view * vec4(in_position, 0.0, 1.0);
+    gl_Position = view * vec4(in_position, 0.5, 1.0);
     color = in_color;
 }
 )";
