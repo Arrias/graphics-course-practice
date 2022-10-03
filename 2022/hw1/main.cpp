@@ -172,7 +172,7 @@ int main(int argc, char **argv) try {
     };
 
     std::vector<Circle> circles;
-    for (int i = 0; i < 1; ++i) {
+    for (int i = 0; i < 7; ++i) {
         auto center = get_rand_cord(20);
         auto direction = directions[getRnd(0, (int) directions.size() - 1)];
         auto coefficient_r = (float) getRnd(0, 1);
