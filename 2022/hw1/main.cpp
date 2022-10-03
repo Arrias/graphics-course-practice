@@ -81,7 +81,7 @@ int main(int argc, char **argv) try {
         throw std::runtime_error("get_component didn't return any");
     };
 
-    float C = 0.8;
+    float C = 1.f;
     std::vector<float> consts_for_lines = {C};
 
     Timer timer;
