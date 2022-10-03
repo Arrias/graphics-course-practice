@@ -87,7 +87,7 @@ void Graph::apply(std::function<float(Vec2, Color &)> &&point_to_color) {
 }
 
 void Graph::draw() const {
-    glLineWidth(10);
+    glLineWidth(5);
     glBindVertexArray(grid.vao);
     glDrawElements(GL_TRIANGLES, (GLsizei) grid.size(), GL_UNSIGNED_INT, (void *) nullptr);
     glBindVertexArray(lines.vao);
@@ -113,7 +113,7 @@ void Graph::addLine(float C) {
 
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < m; ++j) {
-            if (i + 1 < n && lesser(dst[i][j], C) != lesser(dst[i + 1][j], C)) {
+            if (i + 1 < n) {
                 int me = get_id(i, j);
                 int nxt = get_id(i + 1, j);
                 float x = (C - dst[i][j]) / (dst[i + 1][j] - dst[i][j]);
@@ -124,7 +124,7 @@ void Graph::addLine(float C) {
                 h_points[i][j] = lines.points.size();
                 lines.points.emplace_back(beg + x * (end - beg));
             }
-            if (j + 1 < m && lesser(dst[i][j], C) != lesser(dst[i][j + 1], C)) {
+            if (j + 1 < m) {
                 int me = get_id(i, j);
                 int nxt = get_id(i, j + 1);
                 float x = (C - dst[i][j]) / (dst[i][j + 1] - dst[i][j]);
