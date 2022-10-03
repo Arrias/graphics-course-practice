@@ -5,22 +5,22 @@
 
 using std::make_pair;
 const std::vector<std::pair<int, int>> po[16] = {
-        {},
-        {make_pair(2, 3)},
-        {make_pair(1, 2)},
-        {make_pair(1, 3)},
-        {make_pair(0, 1)},
-        {make_pair(0, 3), make_pair(1, 2)},
-        {make_pair(0, 2)},
-        {make_pair(0, 3)},
-        {make_pair(0, 3)},
-        {make_pair(0, 2)},
-        {make_pair(0, 1), make_pair(2, 3)},
-        {make_pair(0, 1)},
-        {make_pair(1, 3)},
-        {make_pair(1, 2)},
-        {make_pair(2, 3)},
-        {}
+        {}, // 0
+        {make_pair(0, 3)}, // 1
+        {make_pair(0, 1)}, // 2
+        {make_pair(1, 3)}, // 3
+        {make_pair(1, 2)}, // 4
+        {make_pair(0, 3), make_pair(1, 2)}, // 5
+        {make_pair(0, 2)}, // 6
+        {make_pair(2, 3)}, // 7
+        {make_pair(2, 3)}, // 8
+        {make_pair(0, 2)}, // 9
+        {make_pair(0, 1), make_pair(2, 3)}, // 10
+        {make_pair(1, 2)}, // 11
+        {make_pair(1, 3)}, // 12
+        {make_pair(0, 1)}, // 13
+        {make_pair(0, 3)}, // 14
+        {} // 15
 };
 
 void Graph::buildGrid(int nn, int mm, int width, int height) {
@@ -99,6 +99,15 @@ Graph::Graph(int nn, int mm, int width, int height) {
 }
 
 void Graph::addLine(float C) {
+//    log("addLine");
+//    for (int i = 0; i < n; ++i) {
+//        for (int j = 0; j < m; ++j) {
+//            std::cout << std::fixed << std::setprecision(3) << lesser(dst[i][j], C) << " ";
+//        }
+//        std::cout << std::endl;
+//    }
+//    std::cout << std::endl;
+
     h_points.assign(n, std::vector<int>(m, -1));
     v_points.assign(n, std::vector<int>(m, -1));
 

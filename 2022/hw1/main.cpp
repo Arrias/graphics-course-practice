@@ -36,7 +36,7 @@ int main(int argc, char **argv) try {
     };
 
     std::vector<Circle> circles;
-    for (int i = 0; i < 1; ++i) {
+    for (int i = 0; i < 7; ++i) {
         auto center = get_rand_cord(20);
         auto direction = directions[getRnd(0, (int) directions.size() - 1)];
         auto coefficient_r = (float) getRnd(0, 1);
@@ -49,12 +49,12 @@ int main(int argc, char **argv) try {
         std::mt19937 rnd(std::chrono::steady_clock::now().time_since_epoch().count());
 
         auto alter = Vec2{float(width) / 2, float(height) / 2};
-        auto new_circle = Circle(alter, Vec2{0, 0}, (float) getRnd(60, 100), 1.f, 0.f, 0.f);
+        auto new_circle = Circle(center, direction, float(getRnd(60, 100)), 1.f, 0.f, 0.f);
         circles.push_back(new_circle);
     }
 
-    int grid_n = 50;
-    int grid_m = 50;
+    int grid_n = 4 + GridQuantityDelta;
+    int grid_m = 4 + GridQuantityDelta;
     Graph graph(grid_n, grid_m, width, height);
 
     const std::vector<std::pair<float, unsigned>> limits = {
@@ -120,14 +120,14 @@ int main(int argc, char **argv) try {
 
         SDL_GetWindowSize(window, &width, &height);
         float view[16]{};
-        gen_view_matrix(view, (float) width, (float) height);
+        gen_view_matrix(view, (float) GridWidth, (float) GridHeight);
         auto dt = timer.tick();
 
         for (auto &circle: circles) {
             circle.move(dt * 100.f, GridWidth, GridHeight);
         }
 
-        graph.apply(std::function<float(Vec2, Color &)>([&timer, &circles, &get_component](Vec2 pos, Color &color) {
+        graph.apply(std::function<float(Vec2, Color & )>([&timer, &circles, &get_component](Vec2 pos, Color &color) {
             float r_dst = 0, g_dst = 0, b_dst = 0, dst = 0;
             for (Circle &circle: circles) {
                 float add = circle.f(pos);
@@ -152,6 +152,7 @@ int main(int argc, char **argv) try {
         glClear(GL_COLOR_BUFFER_BIT);
 
         // set uniform
+        glUseProgram(program);
         glUniformMatrix4fv((GLint) view_location, 1, GL_TRUE, view);
 
         graph.draw();
