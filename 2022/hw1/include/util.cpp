@@ -76,7 +76,6 @@ GLuint create_program(GLuint vertex_shader, GLuint fragment_shader) {
 
 void gen_view_matrix(float *m, float width, float height) {
     float aspect_ratio = height / width;
-    //aspect_ratio = 1.f;
     float view[16] = {
             2.f / (float) width, 0.f, 0.f, -1.f,
             0.f, (-2.f) / (float) height, 0.f, 1.f,
