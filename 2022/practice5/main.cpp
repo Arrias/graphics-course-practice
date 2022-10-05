@@ -2,7 +2,9 @@
 #include <SDL.h>
 #undef main
 #else
+
 #include <SDL2/SDL.h>
+
 #endif
 
 #include <GL/glew.h>
@@ -18,63 +20,119 @@
 #include "obj_parser.hpp"
 #include "stb_image.h"
 
-std::string to_string(std::string_view str)
-{
+struct Vec2 {
+    float x, y;
+};
+
+struct Color {
+    std::uint8_t data[4]{};
+};
+
+template<class T>
+void bindData(GLuint array_type, GLuint vbo, GLuint vao, const std::vector<T> &vec) {
+    glBindVertexArray(vao);
+    glBindBuffer(array_type, vbo);
+    glBufferData(array_type, sizeof(T) * vec.size(), vec.data(), GL_STATIC_DRAW);
+}
+
+template<class T>
+void bindArgument(GLuint array_type, GLuint vbo, GLuint vao, size_t arg, GLint size, GLenum type, GLboolean norm, const GLvoid *pointer) {
+    glBindVertexArray(vao);
+    glBindBuffer(array_type, vbo);
+    glEnableVertexAttribArray(arg);
+    glVertexAttribPointer(arg, size, type, norm, sizeof(T), pointer);
+}
+
+struct PointsHolder {
+    std::vector<Vec2> points;
+    std::vector<Color> colors;
+    std::vector<uint32_t> ids;
+    GLuint points_vbo{}, colors_vbo{}, vao{}, ebo{};
+
+    PointsHolder() {
+        glGenVertexArrays(1, &vao);
+        glGenBuffers(1, &points_vbo);
+        glGenBuffers(1, &colors_vbo);
+        glGenBuffers(1, &ebo);
+        bindArgument<Vec2>(GL_ARRAY_BUFFER, points_vbo, vao, 0, 2, GL_FLOAT, GL_FALSE, (void *) nullptr);
+        bindArgument<Color>(GL_ARRAY_BUFFER, colors_vbo, vao, 1, 4, GL_UNSIGNED_BYTE, GL_TRUE, (void *) nullptr);
+    }
+
+    void updColors() const {
+        bindData(GL_ARRAY_BUFFER, colors_vbo, vao, colors);
+    }
+
+    void updPoints() const {
+        bindData(GL_ARRAY_BUFFER, points_vbo, vao, points);
+    }
+
+    void updIndexes() const {
+        bindData(GL_ELEMENT_ARRAY_BUFFER, ebo, vao, ids);
+    }
+
+    size_t size() const {
+        return ids.size();
+    }
+};
+
+std::string to_string(std::string_view str) {
     return std::string(str.begin(), str.end());
 }
 
-void sdl2_fail(std::string_view message)
-{
+void sdl2_fail(std::string_view message) {
     throw std::runtime_error(to_string(message) + SDL_GetError());
 }
 
-void glew_fail(std::string_view message, GLenum error)
-{
+void glew_fail(std::string_view message, GLenum error) {
     throw std::runtime_error(to_string(message) + reinterpret_cast<const char *>(glewGetErrorString(error)));
 }
 
 const char vertex_shader_source[] =
-R"(#version 330 core
+        R"(#version 330 core
 
 uniform mat4 transform;
 uniform mat4 projection;
 
 layout (location = 0) in vec3 in_position;
 layout (location = 1) in vec3 in_normal;
+layout (location = 2) in vec2 in_texcoord;
 
 out vec3 normal;
+out vec2 texcoord;
 
 void main()
 {
     gl_Position = projection * transform * vec4(in_position, 1.0);
     normal = mat3(transform) * in_normal;
+    texcoord = in_texcoord;
 }
 )";
 
 const char fragment_shader_source[] =
-R"(#version 330 core
+        R"(#version 330 core
 
 in vec3 normal;
+in vec2 texcoord;
 
 layout (location = 0) out vec4 out_color;
+uniform sampler2D sampler;
+uniform float time;
 
 void main()
 {
     float lightness = 0.5 + 0.5 * dot(normalize(normal), normalize(vec3(1.0, 2.0, 3.0)));
-    vec3 albedo = vec3(1.0);
-    out_color = vec4(lightness * albedo, 1.0);
+    vec4 albedo = texture(sampler, texcoord + vec2(time, time));
+    out_color = vec4(lightness * albedo);
 }
 )";
 
-GLuint create_shader(GLenum type, const char * source)
-{
+GLuint create_shader(GLenum type, const char *source) {
     GLuint result = glCreateShader(type);
     glShaderSource(result, 1, &source, nullptr);
     glCompileShader(result);
     GLint status;
     glGetShaderiv(result, GL_COMPILE_STATUS, &status);
-    if (status != GL_TRUE)
-    {
+    if (status != GL_TRUE) {
         GLint info_log_length;
         glGetShaderiv(result, GL_INFO_LOG_LENGTH, &info_log_length);
         std::string info_log(info_log_length, '\0');
@@ -84,8 +142,7 @@ GLuint create_shader(GLenum type, const char * source)
     return result;
 }
 
-GLuint create_program(GLuint vertex_shader, GLuint fragment_shader)
-{
+GLuint create_program(GLuint vertex_shader, GLuint fragment_shader) {
     GLuint result = glCreateProgram();
     glAttachShader(result, vertex_shader);
     glAttachShader(result, fragment_shader);
@@ -93,8 +150,7 @@ GLuint create_program(GLuint vertex_shader, GLuint fragment_shader)
 
     GLint status;
     glGetProgramiv(result, GL_LINK_STATUS, &status);
-    if (status != GL_TRUE)
-    {
+    if (status != GL_TRUE) {
         GLint info_log_length;
         glGetProgramiv(result, GL_INFO_LOG_LENGTH, &info_log_length);
         std::string info_log(info_log_length, '\0');
@@ -105,8 +161,7 @@ GLuint create_program(GLuint vertex_shader, GLuint fragment_shader)
     return result;
 }
 
-int main() try
-{
+int main() try {
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
         sdl2_fail("SDL_Init: ");
 
@@ -121,11 +176,11 @@ int main() try
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
-    SDL_Window * window = SDL_CreateWindow("Graphics course practice 5",
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
-        800, 600,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
+    SDL_Window *window = SDL_CreateWindow("Graphics course practice 5",
+                                          SDL_WINDOWPOS_CENTERED,
+                                          SDL_WINDOWPOS_CENTERED,
+                                          800, 600,
+                                          SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
 
     if (!window)
         sdl2_fail("SDL_CreateWindow: ");
@@ -151,10 +206,86 @@ int main() try
 
     GLuint transform_location = glGetUniformLocation(program, "transform");
     GLuint projection_location = glGetUniformLocation(program, "projection");
+    GLuint sampler_location = glGetUniformLocation(program, "sampler");
+    GLuint time_location = glGetUniformLocation(program, "time");
 
     std::string project_root = PROJECT_ROOT;
     std::string cow_texture_path = project_root + "/cow.png";
     obj_data cow = parse_obj(project_root + "/cow.obj");
+
+    GLuint vao, vbo, ebo, texcoord_vbo;
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glGenBuffers(1, &ebo);
+    glGenBuffers(1, &texcoord_vbo);
+
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(uint32_t) * cow.indices.size(), cow.indices.data(), GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(obj_data::vertex) * cow.vertices.size(), cow.vertices.data(), GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(obj_data::vertex), (void *) nullptr);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(obj_data::vertex), (void *) (sizeof(float) * 3));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(obj_data::vertex), (void *) (sizeof(float) * 6));
+
+    GLuint texture;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+
+    const std::size_t tex_size = 512;
+    std::vector<std::uint32_t> pixels(tex_size * tex_size);
+    for (int i = 0; i < tex_size; ++i) {
+        for (int j = 0; j < tex_size; ++j) {
+            if ((i + j) % 2) {
+                pixels[i * tex_size + j] = 0xFF000000u;
+            } else {
+                pixels[i * tex_size + j] = 0xFFFFFFFFu;
+            }
+        }
+    }
+
+//    internalFormat = GL_RGBA8
+//    format = GL_RGBA,
+//    type = GL_UNSIGNED_BYTE
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, tex_size, tex_size, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    auto putMipmap = [&](int lvl, std::uint32_t color) {
+        size_t len = tex_size / (1u << lvl);
+        std::vector<std::uint32_t> src(len * len, color);
+        glTexImage2D(GL_TEXTURE_2D, lvl, GL_RGBA8, len, len, 0, GL_RGBA, GL_UNSIGNED_BYTE, src.data());
+    };
+
+    std::uint32_t RED_COLOR = 0x000000FFu;
+    std::uint32_t GREEN_COLOR = 0x0000FF00u;
+    std::uint32_t BLUE_COLOR = 0x00FF0000u;
+
+    putMipmap(1, RED_COLOR);
+    putMipmap(2, GREEN_COLOR);
+    putMipmap(3, BLUE_COLOR);
+
+    // * real texture
+    GLuint cow_texture;
+    glGenTextures(1, &cow_texture);
+    glBindTexture(GL_TEXTURE_2D, cow_texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+
+    int cow_texture_width;
+    int cow_texture_height;
+    int cow_comp;
+    stbi_uc *cow_pixels = stbi_load(cow_texture_path.data(), &cow_texture_width, &cow_texture_height, &cow_comp, 4);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, cow_texture_width, cow_texture_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, cow_pixels);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    stbi_image_free(cow_pixels);
 
     auto last_frame_start = std::chrono::high_resolution_clock::now();
 
@@ -166,29 +297,28 @@ int main() try
     std::map<SDL_Keycode, bool> button_down;
 
     bool running = true;
-    while (running)
-    {
-        for (SDL_Event event; SDL_PollEvent(&event);) switch (event.type)
-        {
-        case SDL_QUIT:
-            running = false;
-            break;
-        case SDL_WINDOWEVENT: switch (event.window.event)
-            {
-            case SDL_WINDOWEVENT_RESIZED:
-                width = event.window.data1;
-                height = event.window.data2;
-                glViewport(0, 0, width, height);
-                break;
+    while (running) {
+        for (SDL_Event event; SDL_PollEvent(&event);)
+            switch (event.type) {
+                case SDL_QUIT:
+                    running = false;
+                    break;
+                case SDL_WINDOWEVENT:
+                    switch (event.window.event) {
+                        case SDL_WINDOWEVENT_RESIZED:
+                            width = event.window.data1;
+                            height = event.window.data2;
+                            glViewport(0, 0, width, height);
+                            break;
+                    }
+                    break;
+                case SDL_KEYDOWN:
+                    button_down[event.key.keysym.sym] = true;
+                    break;
+                case SDL_KEYUP:
+                    button_down[event.key.keysym.sym] = false;
+                    break;
             }
-            break;
-        case SDL_KEYDOWN:
-            button_down[event.key.keysym.sym] = true;
-            break;
-        case SDL_KEYUP:
-            button_down[event.key.keysym.sym] = false;
-            break;
-        }
 
         if (!running)
             break;
@@ -198,8 +328,8 @@ int main() try
         last_frame_start = now;
         time += dt;
 
-        if (button_down[SDLK_UP]) offset_z -= 4.f * dt;
-        if (button_down[SDLK_DOWN]) offset_z += 4.f * dt;
+        if (button_down[SDLK_DOWN]) offset_z -= 4.f * dt;
+        if (button_down[SDLK_UP]) offset_z += 4.f * dt;
         if (button_down[SDLK_LEFT]) angle_y += 4.f * dt;
         if (button_down[SDLK_RIGHT]) angle_y -= 4.f * dt;
 
@@ -212,33 +342,38 @@ int main() try
         float right = (top * width) / height;
 
         float transform[16] =
-        {
-            std::cos(angle_y), 0.f, -std::sin(angle_y), 0.f,
-            0.f, 1.f, 0.f, 0.f,
-            std::sin(angle_y), 0.f, std::cos(angle_y), offset_z,
-            0.f, 0.f, 0.f, 1.f,
-        };
+                {
+                        std::cos(angle_y), 0.f, -std::sin(angle_y), 0.f,
+                        0.f, 1.f, 0.f, 0.f,
+                        std::sin(angle_y), 0.f, std::cos(angle_y), offset_z,
+                        0.f, 0.f, 0.f, 1.f,
+                };
 
         float projection[16] =
-        {
-            near / right, 0.f, 0.f, 0.f,
-            0.f, near / top, 0.f, 0.f,
-            0.f, 0.f, - (far + near) / (far - near), - 2.f * far * near / (far - near),
-            0.f, 0.f, -1.f, 0.f,
-        };
+                {
+                        near / right, 0.f, 0.f, 0.f,
+                        0.f, near / top, 0.f, 0.f,
+                        0.f, 0.f, -(far + near) / (far - near), -2.f * far * near / (far - near),
+                        0.f, 0.f, -1.f, 0.f,
+                };
 
         glUseProgram(program);
+        glUniform1i(sampler_location, 1);
+        glUniform1f(time_location, time);
         glUniformMatrix4fv(transform_location, 1, GL_TRUE, transform);
         glUniformMatrix4fv(projection_location, 1, GL_TRUE, projection);
 
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, cow_texture);
+
+        glDrawElements(GL_TRIANGLES, cow.indices.size(), GL_UNSIGNED_INT, (void *) nullptr);
         SDL_GL_SwapWindow(window);
     }
 
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);
 }
-catch (std::exception const & e)
-{
+catch (std::exception const &e) {
     std::cerr << e.what() << std::endl;
     return EXIT_FAILURE;
 }
