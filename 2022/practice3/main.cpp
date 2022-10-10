@@ -137,6 +137,7 @@ class PointHolder : public std::vector<vertex> {
     }
 };
 
+>>>>>>> dbd15e4f882eb5663a1f4ceae269ea006b2be97a
 int main() try {
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
