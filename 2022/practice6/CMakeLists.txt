@@ -27,6 +27,24 @@ set(TARGET_NAME "${PROJECT_NAME}")
 set(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_executable(${TARGET_NAME} main.cpp obj_parser.hpp obj_parser.cpp)
+
+
+add_executable(matrix_test matrix_test.cpp)
+
+target_include_directories(matrix_test PUBLIC
+		"${SDL2_INCLUDE_DIRS}"
+		"${GLEW_INCLUDE_DIRS}"
+		"${OPENGL_INCLUDE_DIRS}"
+		)
+target_link_libraries(matrix_test PUBLIC
+		glm
+		"${GLEW_LIBRARIES}"
+		"${SDL2_LIBRARIES}"
+		"${OPENGL_LIBRARIES}"
+		)
+target_compile_definitions(matrix_test PUBLIC -DPROJECT_ROOT="${PROJECT_ROOT}")
+
+
 target_include_directories(${TARGET_NAME} PUBLIC
 	"${SDL2_INCLUDE_DIRS}"
 	"${GLEW_INCLUDE_DIRS}"
