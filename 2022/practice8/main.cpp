@@ -91,6 +91,8 @@ void main()
 {
     bool shadow = false;
     vec4 ndc = shadow_projection * vec4(position,1.0);
+
+    float shadow_sum = 1.0;
     if (-1 <= ndc.x && ndc.x <= 1 && -1 <= ndc.y && ndc.y <= 1) {
         vec3 shadow_texcoord = ndc.xyz * 0.5 + 0.5;
         float shadow_depth = ndc.z * 0.5 + 0.5;
@@ -98,15 +100,28 @@ void main()
       //  if (texture(shadow_map, shadow_texcoord).r < shadow_depth) {
       //      shadow = true;
       //  }
-        if (texture(shadow_map, shadow_texcoord) == 0.0) {
-            shadow = true;
+
+        float sum = 0.0;
+        float sum_w = 0.0;
+        const int N = 7;
+        float radius = 15.0;
+
+        for (int x = -N; x <= N; ++x) {
+            for (int y = -N; y <= N; ++y) {
+                float c = exp(-float(x * x + y * y) / (radius * radius));
+                vec2 shift = vec2(x,y);
+                shift /= vec2(textureSize(shadow_map, 0));
+                sum += c * texture(shadow_map, shadow_texcoord + vec3(shift.x,shift.y, 0.0));
+                sum_w += c;
+            }
         }
+
+        shadow_sum = sum / sum_w;
     }
 
     float ambient_light = 0.2;
     vec3 color = albedo * ambient_light;
-
-    if (shadow == false) color += sun_color * phong(sun_direction);
+    color += shadow_sum * sun_color * phong(sun_direction);
     out_color = vec4(color, 1.0);
 }
 )";
