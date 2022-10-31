@@ -81,6 +81,9 @@ in vec3 normal;
 
 layout (location = 0) out vec4 out_color;
 
+// TASK 1
+float C = 0.005;
+
 void main()
 {
     vec4 shadow_pos = transform * vec4(position, 1.0);
@@ -90,7 +93,7 @@ void main()
     bool in_shadow_texture = (shadow_pos.x > 0.0) && (shadow_pos.x < 1.0) && (shadow_pos.y > 0.0) && (shadow_pos.y < 1.0) && (shadow_pos.z > 0.0) && (shadow_pos.z < 1.0);
     float shadow_factor = 1.0;
     if (in_shadow_texture)
-        shadow_factor = (texture(shadow_map, shadow_pos.xy).r < shadow_pos.z) ? 0.0 : 1.0;
+        shadow_factor = (texture(shadow_map, shadow_pos.xy).r + C < shadow_pos.z) ? 0.0 : 1.0;
 
     vec3 albedo = vec3(1.0, 1.0, 1.0);
 
@@ -197,6 +200,14 @@ GLuint create_program(GLuint vertex_shader, GLuint fragment_shader)
     }
 
     return result;
+}
+
+void relax_min(float &a, float b) {
+    a = std::min(a, b);
+}
+
+void relax_max(float &a, float b) {
+    a = std::max(a, b);
 }
 
 int main() try
@@ -323,6 +334,31 @@ int main() try
     float view_azimuth = 0.f;
     float camera_distance = 1.5f;
     bool running = true;
+
+    // TASK 2
+    float INF = 1e9;
+
+    float x[2] = {INF, -INF};
+    float y[2] = {INF, -INF};
+    float z[2] = {INF, -INF};
+
+    for (auto &vertex : scene.vertices) {
+        float x_curr = vertex.position[0];
+        float y_curr = vertex.position[1];
+        float z_curr = vertex.position[2];
+
+        relax_min(x[0], x_curr);
+        relax_min(y[0], y_curr);
+        relax_min(z[0], z_curr);
+
+        relax_max(x[1], x_curr);
+        relax_max(y[1], y_curr);
+        relax_max(z[1], z_curr);
+    }
+    glm::vec3 C = {(x[0] + x[1]) / 2, (y[0] + y[1]) / 2, (z[0] + z[1]) / 2};
+
+
+
     while (running)
     {
         for (SDL_Event event; SDL_PollEvent(&event);) switch (event.type)
@@ -387,15 +423,45 @@ int main() try
         glm::vec3 light_z = -light_direction;
         glm::vec3 light_x = glm::normalize(glm::cross(light_z, {0.f, 1.f, 0.f}));
         glm::vec3 light_y = glm::cross(light_x, light_z);
-        float shadow_scale = 2.f;
 
-        glm::mat4 transform = glm::mat4(1.f);
-        for (size_t i = 0; i < 3; ++i)
-        {
-            transform[i][0] = shadow_scale * light_x[i];
-            transform[i][1] = shadow_scale * light_y[i];
-            transform[i][2] = shadow_scale * light_z[i];
+        //  TASK 2
+        float z_len = 0;
+        float x_len = 0;
+        float y_len = 0;
+
+        for (int i = 0; i < 2; ++i) {
+            for (int j = 0; j < 2; ++j) {
+                for (int k = 0; k < 2; ++k) {
+                    glm::vec3 V = {x[i], y[j], z[k]};
+                    relax_max(z_len, glm::dot(V-C, light_z));
+                    relax_max(x_len, glm::dot(V-C, light_x));
+                    relax_max(y_len, glm::dot(V-C, light_y));
+                }
+            }
         }
+
+        auto Z = light_z * z_len;
+        auto X = light_x * x_len;
+        auto Y = light_y * y_len;
+
+        glm::mat4 transform = glm::inverse(glm::transpose(glm::mat4({
+                {X.x, Y.x, Z.x, C.x},
+                {X.y, Y.y, Z.y, C.y},
+                {X.z, Y.z, Z.z, C.z},
+                {0, 0, 0, 1},
+        })));
+        //glm::inverse(glm::transpose(transform));
+
+//
+//        float shadow_scale = 2.f;
+//
+//        glm::mat4 transform = glm::mat4(1.f);
+//        for (size_t i = 0; i < 3; ++i)
+//        {
+//            transform[i][0] = shadow_scale * light_x[i];
+//            transform[i][1] = shadow_scale * light_y[i];
+//            transform[i][2] = shadow_scale * light_z[i];
+//        }
 
         glUseProgram(shadow_program);
         glUniformMatrix4fv(shadow_model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
