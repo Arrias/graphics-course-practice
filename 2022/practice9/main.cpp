@@ -94,9 +94,9 @@ void main()
     vec2 sum = vec2(0.0, 0.0);
     int r = 5;
     float sum_weight = 0;
-    for (int x = -r; x <= r; ++x) {
-        for (int y = -r; y <= r; ++y) {
-            float expo = exp(-(x*x+y*y)/8);
+    for (float x = -r; x <= r; ++x) {
+        for (float y = -r; y <= r; ++y) {
+            float expo = exp(-(x*x+y*y)/8.);
             sum += expo * texture(shadow_map, shadow_pos.xy+vec2(x,y) / textureSize(shadow_map, 0).xy).rg;
             sum_weight += expo;
         }
@@ -109,8 +109,8 @@ void main()
 
     float mu = data.r;
     float sigma = data.g - mu * mu;
-    float z = shadow_pos.z;
-    float factor = (z - C < mu) ? 1.0 :
+    float z = shadow_pos.z - C;
+    float factor = (z < mu) ? 1.0 :
                 sigma / (sigma + (z - mu) * (z - mu));
 
     float l = 0.125;
@@ -365,8 +365,6 @@ int main() try
     glBindRenderbuffer(GL_RENDERBUFFER, rbo);
     glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, shadow_map_resolution, shadow_map_resolution);
 
-
-
     GLuint shadow_fbo;
     glGenFramebuffers(1, &shadow_fbo);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, shadow_fbo);
@@ -374,7 +372,7 @@ int main() try
     // добавляем shadow_map к фреймбуферу как GL_COLOR_ATTACHMENT0 вместо GL_DEPTH_ATTACHMENT
     glFramebufferTexture(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, shadow_map, 0);
     // добавляеем rbo к фреймбуферу как GL_DEPTH_COMPONENT24
-    glFramebufferRenderbuffer(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, shadow_map_resolution, shadow_map_resolution);
+    glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbo);
 
     if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
         throw std::runtime_error("Incomplete framebuffer!");
@@ -393,7 +391,7 @@ int main() try
     bool running = true;
 
     // TASK 2
-    float INF = 1e9;
+    float INF = std::numeric_limits<float>::max();
 
     float x[2] = {INF, -INF};
     float y[2] = {INF, -INF};
