@@ -33,6 +33,7 @@
 #include <glm/gtx/string_cast.hpp>
 
 const std::string log_path = "../log.txt";
+const std::string mtl_path = "../";
 
 struct vec3 {
   tinyobj::real_t x, y, z;
@@ -43,6 +44,7 @@ struct obj_data {
     std::array<float, 3> position;
     std::array<float, 3> normal;
     std::array<float, 2> texcoord;
+    std::array<float, 3> color;
   };
 
   std::vector<vertex> vertices;
@@ -84,12 +86,17 @@ const std::string vertex_shader_source = R"(
 
     layout (location = 0) in vec3 in_position;
     layout (location = 1) in vec3 in_normal;
+    layout (location = 2) in vec2 in_texcoord;
+    layout (location = 3) in vec3 in_color;
 
     out vec3 position;
     out vec3 normal;
+    out vec3 color;
 
     void main() {
         gl_Position = projection * view * model * vec4(in_position, 1.0);
+
+        color = in_color;
         position = (model * vec4(in_position, 1.0)).xyz;
         normal = normalize((model * vec4(in_normal, 0.0)).xyz);
     }
@@ -100,11 +107,34 @@ const std::string fragment_shader_source = R"(
 
     in vec3 position;
     in vec3 normal;
+    in vec3 color;
+
+    uniform vec3 albedo;
+    uniform vec3 sun_color;
+    uniform vec3 camera_position;
+    uniform vec3 sun_direction;
 
     layout (location = 0) out vec4 out_color;
 
+    vec3 diffuse(vec3 direction) {
+      return albedo * max(0.0, dot(normal, direction));
+    }
+
+    vec3 specular(vec3 direction) {
+        float power = 64.0;
+        vec3 reflected_direction = 2.0 * normal * dot(normal, direction) - direction;
+        vec3 view_direction = normalize(camera_position - position);
+        return albedo * pow(max(0.0, dot(reflected_direction, view_direction)), power);
+    }
+
+    vec3 phong(vec3 direction) {
+      return diffuse(direction) + specular(direction);
+    }
+
     void main() {
-        out_color = vec4(1.0, 0, 0, 1.0);
+           float ambient_light = 0.2;
+           vec3 color = albedo * ambient_light + sun_color * phong(sun_direction);
+           out_color = vec4(color, 1.0);
     }
 )";
 
@@ -183,10 +213,16 @@ obj_data parse_scene(const tinyobj::attrib_t &attrib,
         tinyobj::real_t tx = attrib.texcoords[2 * size_t(idx.texcoord_index) + 0];
         tinyobj::real_t ty = attrib.texcoords[2 * size_t(idx.texcoord_index) + 1];
 
+        // Optional: vertex colors
+        tinyobj::real_t red = attrib.colors[3 * size_t(idx.vertex_index) + 0];
+        tinyobj::real_t green = attrib.colors[3 * size_t(idx.vertex_index) + 1];
+        tinyobj::real_t blue = attrib.colors[3 * size_t(idx.vertex_index) + 2];
+
         vertices.push_back(obj_data::vertex{
             .position = {vx, vy, vz},
             .normal = {nx, ny, nz},
-            .texcoord = {tx, ty}
+            .texcoord = {tx, ty},
+            .color = {red, green, blue}
         });
       }
       index_offset += fv;
@@ -244,6 +280,10 @@ int main(int argc, char **argv) try {
   GLuint model_location = glGetUniformLocation(program, "model");
   GLuint view_location = glGetUniformLocation(program, "view");
   GLuint projection_location = glGetUniformLocation(program, "projection");
+  GLuint albedo_location = glGetUniformLocation(program, "albedo");
+  GLuint sun_direction_location = glGetUniformLocation(program, "sun_direction");
+  GLuint sun_color_location = glGetUniformLocation(program, "sun_color");
+  GLuint camera_position_location = glGetUniformLocation(program, "camera_position");
 
   glUseProgram(program);
 
@@ -253,15 +293,20 @@ int main(int argc, char **argv) try {
   const auto scene_path = std::string{argv[1]};
   Logger::log("[scene_path] =", scene_path);
 
-  tinyobj::attrib_t attrib;
-  std::vector<tinyobj::shape_t> shapes;
-  std::vector<tinyobj::material_t> materials;
-  std::string warn;
-  std::string err;
+  tinyobj::ObjReaderConfig reader_config;
+  reader_config.mtl_search_path = mtl_path;
+  tinyobj::ObjReader reader;
 
-  bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, scene_path.data());
-  Logger::log("[warn] =", warn);
-  Logger::log("[err] =", err);
+  if (!reader.ParseFromFile(scene_path, reader_config)) {
+    if (!reader.Error().empty()) {
+      throw std::runtime_error("TinyObjReader: " + reader.Error());
+    }
+    throw;
+  }
+  Logger::log(reader.Warning());
+  auto &attrib = reader.GetAttrib();
+  auto &shapes = reader.GetShapes();
+  auto &materials = reader.GetMaterials();
 
   obj_data scene = parse_scene(attrib, shapes, materials);
 
@@ -272,11 +317,15 @@ int main(int argc, char **argv) try {
 
   bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 0, 3, GL_FLOAT, GL_FALSE, (void *) nullptr);
   bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 1, 3, GL_FLOAT, GL_FALSE, (void *) 12);
+  bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 2, 2, GL_FLOAT, GL_FALSE, (void *) 24);
+  bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 3, 3, GL_FLOAT, GL_FALSE, (void *) 32);
+
   bindData(GL_ARRAY_BUFFER, vbo, vao, scene.vertices);
 
-  float view_elevation = glm::radians(45.f);
+  float view_elevation = glm::radians(30.f);
   float view_azimuth = 0.f;
-  float camera_distance = 1.5f;
+  float camera_distance = 900.f;
+  float y = 0;
   float time = 0.f;
 
   std::map<SDL_Keycode, bool> button_down;
@@ -284,6 +333,23 @@ int main(int argc, char **argv) try {
 
   bool running = true;
   bool paused = false;
+
+  auto update_view_parameters = [&button_down, &camera_distance, &view_azimuth, &view_elevation, &y](float dt) {
+    if (button_down[SDLK_UP])
+      camera_distance -= 400.f * dt;
+    if (button_down[SDLK_DOWN])
+      camera_distance += 400.f * dt;
+
+    if (button_down[SDLK_LEFT])
+      view_azimuth -= 1.f * dt, y += 5.0;
+    if (button_down[SDLK_RIGHT])
+      view_azimuth += 1.f * dt, y -= 5.0;
+
+    if (button_down[SDLK_g])
+      view_elevation += glm::radians(.15f);
+    if (button_down[SDLK_h])
+      view_elevation -= glm::radians(.15f);
+  };
 
   while (true) {
     for (SDL_Event event; SDL_PollEvent(&event);) {
@@ -315,19 +381,9 @@ int main(int argc, char **argv) try {
     last_frame_start = now;
     if (!paused)
       time += dt;
-
-    if (button_down[SDLK_UP])
-      camera_distance -= 1.f * dt;
-    if (button_down[SDLK_DOWN])
-      camera_distance += 1.f * dt;
-
-    if (button_down[SDLK_LEFT])
-      view_azimuth -= 2.f * dt;
-    if (button_down[SDLK_RIGHT])
-      view_azimuth += 2.f * dt;
+    update_view_parameters(dt);
 
     glm::mat4 model(1.f);
-
     glUseProgram(program);
     glClearColor(0.8, 0.8, 0.9, 0.f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -337,21 +393,29 @@ int main(int argc, char **argv) try {
     glViewport(0, 0, width, height);
 
     glEnable(GL_CULL_FACE);
-    glCullFace(GL_FRONT);
+    glCullFace(GL_BACK);
 
     float near = 0.01f;
-    float far = 100.f;
+    float far = 5000.f;
 
     glm::mat4 view(1.f);
-    view = glm::translate(view, {0.f, 0.f, -camera_distance});
-    view = glm::rotate(view, view_elevation, {1.f, 0.f, 0.f});
-    view = glm::rotate(view, view_azimuth, {0.f, 1.f, 0.f});
+
+//    view = glm::rotate(view, view_azimuth, {0.f, 1.f, 1.f});
+    view = glm::translate(view, {y, 0.f, -camera_distance});
+    // view = glm::rotate(view, view_elevation, {1.f, 0.f, 0.f});
     glm::mat4 projection = glm::mat4(1.f);
     projection = glm::perspective(glm::pi<float>() / 2.f, (1.f * width) / height, near, far);
+    glm::vec3 sun_direction = glm::normalize(glm::vec3(std::sin(time * 0.5f), 2.f, std::cos(time * 0.5f)));
+    glm::vec3 camera_position = (glm::inverse(view) * glm::vec4(0.f, 0.f, 0.f, 1.f)).xyz();
 
     glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
     glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
     glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
+    glUniform3f(albedo_location, .8f, .7f, .6f);
+    glUniform3f(sun_color_location, 1.f, 1.f, 1.f);
+    glUniform3fv(sun_direction_location, 1, reinterpret_cast<float *>(&sun_direction));
+    glUniform3fv(camera_position_location, 1, (float *) (&camera_position));
+
     glBindVertexArray(vao);
     glDrawArrays(GL_TRIANGLES, 0, scene.vertices.size());
 
