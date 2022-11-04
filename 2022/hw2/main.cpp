@@ -11,6 +11,7 @@
 
 #include <GL/glew.h>
 
+#include <filesystem>
 #include <string_view>
 #include <stdexcept>
 #include <iostream>
@@ -20,7 +21,9 @@
 #include <cmath>
 #include <fstream>
 #include <sstream>
+
 #include "tiny_obj_loader.hpp"
+#include "stb_image.h"
 
 #define GLM_FORCE_SWIZZLE
 #define GLM_ENABLE_EXPERIMENTAL
@@ -34,9 +37,14 @@
 
 const std::string log_path = "../log.txt";
 const std::string mtl_path = "../";
+const std::string texture_path = "../textures";
 
 struct vec3 {
   tinyobj::real_t x, y, z;
+};
+
+struct Segment {
+  size_t l, r;
 };
 
 struct obj_data {
@@ -44,10 +52,12 @@ struct obj_data {
     std::array<float, 3> position;
     std::array<float, 3> normal;
     std::array<float, 2> texcoord;
-    std::array<float, 3> color;
+    size_t texture_number;
   };
 
   std::vector<vertex> vertices;
+  std::vector<Segment> segments; // for every shape [l..r) in vertices
+  std::vector<size_t> texture_ids;
 };
 
 namespace Logger {
@@ -87,18 +97,17 @@ const std::string vertex_shader_source = R"(
     layout (location = 0) in vec3 in_position;
     layout (location = 1) in vec3 in_normal;
     layout (location = 2) in vec2 in_texcoord;
-    layout (location = 3) in vec3 in_color;
 
     out vec3 position;
     out vec3 normal;
-    out vec3 color;
+    out vec2 texcoord;
 
     void main() {
         gl_Position = projection * view * model * vec4(in_position, 1.0);
 
-        color = in_color;
         position = (model * vec4(in_position, 1.0)).xyz;
         normal = normalize((model * vec4(in_normal, 0.0)).xyz);
+        texcoord = in_texcoord;
     }
 )";
 
@@ -107,33 +116,34 @@ const std::string fragment_shader_source = R"(
 
     in vec3 position;
     in vec3 normal;
-    in vec3 color;
+    in vec2 texcoord;
 
-    uniform vec3 albedo;
     uniform vec3 sun_color;
     uniform vec3 camera_position;
     uniform vec3 sun_direction;
+    uniform sampler2D sampler;
 
     layout (location = 0) out vec4 out_color;
 
-    vec3 diffuse(vec3 direction) {
+    vec3 diffuse(vec3 direction, vec3 albedo) {
       return albedo * max(0.0, dot(normal, direction));
     }
 
-    vec3 specular(vec3 direction) {
+    vec3 specular(vec3 direction, vec3 albedo) {
         float power = 64.0;
         vec3 reflected_direction = 2.0 * normal * dot(normal, direction) - direction;
         vec3 view_direction = normalize(camera_position - position);
         return albedo * pow(max(0.0, dot(reflected_direction, view_direction)), power);
     }
 
-    vec3 phong(vec3 direction) {
-      return diffuse(direction) + specular(direction);
+    vec3 phong(vec3 direction, vec3 albedo) {
+      return diffuse(direction, albedo) + specular(direction, albedo);
     }
 
     void main() {
+           vec3 albedo = texture(sampler, texcoord).xyz;
            float ambient_light = 0.2;
-           vec3 color = albedo * ambient_light + sun_color * phong(sun_direction);
+           vec3 color = albedo * ambient_light + sun_color * phong(sun_direction, albedo);
            out_color = vec4(color, 1.0);
     }
 )";
@@ -188,16 +198,60 @@ GLuint create_program(GLuint vertex_shader, GLuint fragment_shader) {
   return result;
 }
 
+using TextureKeeper = std::map<std::string, GLuint>;
+
+TextureKeeper loadTextures(const std::string &path) {
+  TextureKeeper result;
+  for (int i = 0; const auto &dirEntry : std::filesystem::directory_iterator(path)) {
+    GLuint texture;
+    glGenTextures(1, &texture);
+    glActiveTexture(GL_TEXTURE0 + i);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+
+    int width;
+    int height;
+    int comp;
+    stbi_uc *pixels = stbi_load(dirEntry.path().c_str(), &width, &height, &comp, 4);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    stbi_image_free(pixels);
+
+    std::string current_path;
+    for (int j = 3; j < dirEntry.path().string().size(); ++j) {
+      if (dirEntry.path().string()[j] == '/') {
+        current_path += '\\';
+      } else {
+        current_path += dirEntry.path().string()[j];
+      }
+    }
+
+    result[current_path] = i++;
+  };
+
+  return result;
+}
+
 obj_data parse_scene(const tinyobj::attrib_t &attrib,
                      const std::vector<tinyobj::shape_t> &shapes,
-                     const std::vector<tinyobj::material_t> &materials) {
+                     const std::vector<tinyobj::material_t> &materials,
+                     TextureKeeper &texture_keeper) {
   std::vector<obj_data::vertex> vertices;
+  std::vector<Segment> segments;
+  std::vector<size_t> texture_unit_ids;
+
   for (const auto &shape : shapes) {
     size_t index_offset = 0;
+    auto start_index = vertices.size();
+    auto material_id = shape.mesh.material_ids[0];
+    texture_unit_ids.push_back(texture_keeper[materials[material_id].ambient_texname]);
+
     for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); ++f) {
       auto fv = size_t(shape.mesh.num_face_vertices[f]);
 
       for (size_t v = 0; v < fv; ++v) {
+
         tinyobj::index_t idx = shape.mesh.indices[index_offset + v];
 
         tinyobj::real_t vx = attrib.vertices[3 * size_t(idx.vertex_index) + 0];
@@ -214,24 +268,32 @@ obj_data parse_scene(const tinyobj::attrib_t &attrib,
         tinyobj::real_t ty = attrib.texcoords[2 * size_t(idx.texcoord_index) + 1];
 
         // Optional: vertex colors
-        tinyobj::real_t red = attrib.colors[3 * size_t(idx.vertex_index) + 0];
-        tinyobj::real_t green = attrib.colors[3 * size_t(idx.vertex_index) + 1];
-        tinyobj::real_t blue = attrib.colors[3 * size_t(idx.vertex_index) + 2];
+//        tinyobj::real_t red = attrib.colors[3 * size_t(idx.vertex_index) + 0];
+//        tinyobj::real_t green = attrib.colors[3 * size_t(idx.vertex_index) + 1];
+//        tinyobj::real_t blue = attrib.colors[3 * size_t(idx.vertex_index) + 2];
 
         vertices.push_back(obj_data::vertex{
             .position = {vx, vy, vz},
             .normal = {nx, ny, nz},
             .texcoord = {tx, ty},
-            .color = {red, green, blue}
         });
       }
+
       index_offset += fv;
       shape.mesh.material_ids[f];
     }
+
+    auto finish_index = vertices.size();
+    segments.push_back(Segment{
+        .l = start_index,
+        .r = finish_index
+    });
   }
 
   return obj_data{
-      .vertices = vertices
+      .vertices = vertices,
+      .segments = segments,
+      .texture_ids = texture_unit_ids
   };
 }
 
@@ -272,6 +334,10 @@ int main(int argc, char **argv) try {
   if (!GLEW_VERSION_3_3)
     throw std::runtime_error("OpenGL 3.3 is not supported");
 
+  int texture_units;
+  glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &texture_units);
+  Logger::log("Count texture units =", texture_units);
+
   // Создаем шейдеры
   auto vertex_shader = create_shader(GL_VERTEX_SHADER, vertex_shader_source.data());
   auto fragment_shader = create_shader(GL_FRAGMENT_SHADER, fragment_shader_source.data());
@@ -280,7 +346,7 @@ int main(int argc, char **argv) try {
   GLuint model_location = glGetUniformLocation(program, "model");
   GLuint view_location = glGetUniformLocation(program, "view");
   GLuint projection_location = glGetUniformLocation(program, "projection");
-  GLuint albedo_location = glGetUniformLocation(program, "albedo");
+  GLuint sampler_location = glGetUniformLocation(program, "sampler");
   GLuint sun_direction_location = glGetUniformLocation(program, "sun_direction");
   GLuint sun_color_location = glGetUniformLocation(program, "sun_color");
   GLuint camera_position_location = glGetUniformLocation(program, "camera_position");
@@ -290,6 +356,9 @@ int main(int argc, char **argv) try {
   if (argc < 2) {
     throw std::runtime_error("Error: please, specify scene path");
   }
+
+  // Загрузка текстур и сцены
+  auto textures = loadTextures(texture_path);
   const auto scene_path = std::string{argv[1]};
   Logger::log("[scene_path] =", scene_path);
 
@@ -308,17 +377,16 @@ int main(int argc, char **argv) try {
   auto &shapes = reader.GetShapes();
   auto &materials = reader.GetMaterials();
 
-  obj_data scene = parse_scene(attrib, shapes, materials);
+  obj_data scene = parse_scene(attrib, shapes, materials, textures);
 
   // Привязываем сцену к vbo, vao, ebo
   GLuint vao, vbo;
   glGenVertexArrays(1, &vao);
   glGenBuffers(1, &vbo);
 
-  bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 0, 3, GL_FLOAT, GL_FALSE, (void *) nullptr);
-  bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 1, 3, GL_FLOAT, GL_FALSE, (void *) 12);
-  bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 2, 2, GL_FLOAT, GL_FALSE, (void *) 24);
-  bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 3, 3, GL_FLOAT, GL_FALSE, (void *) 32);
+  bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 0, 3, GL_FLOAT, GL_FALSE, (void *) nullptr); // точка
+  bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 1, 3, GL_FLOAT, GL_FALSE, (void *) 12); // нормаль
+  bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 2, 2, GL_FLOAT, GL_FALSE, (void *) 24); // текстурные координаты
 
   bindData(GL_ARRAY_BUFFER, vbo, vao, scene.vertices);
 
@@ -399,10 +467,10 @@ int main(int argc, char **argv) try {
     float far = 5000.f;
 
     glm::mat4 view(1.f);
+    view = glm::translate(view, {0.f, 0.f, -camera_distance});
+    view = glm::rotate(view, view_elevation, {1.f, 0.f, 0.f});
+    view = glm::rotate(view, view_azimuth, {0.f, 1.f, 0.f});
 
-//    view = glm::rotate(view, view_azimuth, {0.f, 1.f, 1.f});
-    view = glm::translate(view, {y, 0.f, -camera_distance});
-    // view = glm::rotate(view, view_elevation, {1.f, 0.f, 0.f});
     glm::mat4 projection = glm::mat4(1.f);
     projection = glm::perspective(glm::pi<float>() / 2.f, (1.f * width) / height, near, far);
     glm::vec3 sun_direction = glm::normalize(glm::vec3(std::sin(time * 0.5f), 2.f, std::cos(time * 0.5f)));
@@ -411,13 +479,15 @@ int main(int argc, char **argv) try {
     glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
     glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
     glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
-    glUniform3f(albedo_location, .8f, .7f, .6f);
     glUniform3f(sun_color_location, 1.f, 1.f, 1.f);
     glUniform3fv(sun_direction_location, 1, reinterpret_cast<float *>(&sun_direction));
     glUniform3fv(camera_position_location, 1, (float *) (&camera_position));
 
     glBindVertexArray(vao);
-    glDrawArrays(GL_TRIANGLES, 0, scene.vertices.size());
+    for (int j = 0; const auto &i : scene.segments) {
+      glUniform1i(sampler_location, scene.texture_ids[j++]);
+      glDrawArrays(GL_TRIANGLES, i.l, i.r - i.l);
+    }
 
     SDL_GL_SwapWindow(window);
   }

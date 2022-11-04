@@ -1,3 +1,4 @@
+Count texture units = 192
 [scene_path] = /home/arrias/Projects/graphics/graphics-course-practice/2022/hw2/sponza.obj
 Both `d` and `Tr` parameters defined for "leaf". Use the value of `d` for dissolve (line 8 in .mtl.)
 Both `d` and `Tr` parameters defined for "vase_round". Use the value of `d` for dissolve (line 24 in .mtl.)
