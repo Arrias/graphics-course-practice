@@ -39,6 +39,9 @@ const std::string log_path = "../log.txt";
 const std::string mtl_path = "../";
 const std::string texture_path = "../textures";
 
+const auto pi = (float) acos(-1);
+const auto eps = (float) 0.01;
+
 struct vec3 {
   tinyobj::real_t x, y, z;
 };
@@ -297,6 +300,39 @@ obj_data parse_scene(const tinyobj::attrib_t &attrib,
   };
 }
 
+struct Player {
+  glm::vec3 coords{0.f, 0.f, -900.f};
+  float alpha{}, gamma{};
+
+  void update(std::map<SDL_Keycode, bool> &button_down, float dt) {
+    float d_x = 500.f * sin(alpha) * sin(gamma);
+    float d_z = 500.f * cos(alpha) * sin(gamma);
+    float d_y = 500.f * cos(gamma);
+
+    if (button_down[SDLK_UP]) {
+      coords.x += d_x * dt;
+      coords.y += d_y * dt;
+      coords.z += d_z * dt;
+    }
+    if (button_down[SDLK_DOWN]) {
+      coords.x -= d_x * dt;
+      coords.y -= d_y * dt;
+      coords.z -= d_z * dt;
+    }
+
+    if (button_down[SDLK_LEFT])
+      alpha += 1.5f * dt;
+    if (button_down[SDLK_RIGHT])
+      alpha -= 1.5f * dt;
+
+    if (button_down[SDLK_g])
+      gamma = std::max(gamma - 1.5f * dt, eps);
+    if (button_down[SDLK_h])
+      gamma = std::min(gamma + 1.5f * dt, pi - eps);
+  }
+
+};
+
 int main(int argc, char **argv) try {
   std::freopen(log_path.data(), "w", stderr);
   if (SDL_Init(SDL_INIT_VIDEO) != 0)
@@ -390,34 +426,14 @@ int main(int argc, char **argv) try {
 
   bindData(GL_ARRAY_BUFFER, vbo, vao, scene.vertices);
 
-  float view_elevation = glm::radians(30.f);
-  float view_azimuth = 0.f;
-  float camera_distance = 900.f;
-  float y = 0;
   float time = 0.f;
 
   std::map<SDL_Keycode, bool> button_down;
   auto last_frame_start = std::chrono::high_resolution_clock::now();
+  Player player;
 
   bool running = true;
   bool paused = false;
-
-  auto update_view_parameters = [&button_down, &camera_distance, &view_azimuth, &view_elevation, &y](float dt) {
-    if (button_down[SDLK_UP])
-      camera_distance -= 400.f * dt;
-    if (button_down[SDLK_DOWN])
-      camera_distance += 400.f * dt;
-
-    if (button_down[SDLK_LEFT])
-      view_azimuth -= 1.f * dt, y += 5.0;
-    if (button_down[SDLK_RIGHT])
-      view_azimuth += 1.f * dt, y -= 5.0;
-
-    if (button_down[SDLK_g])
-      view_elevation += glm::radians(.15f);
-    if (button_down[SDLK_h])
-      view_elevation -= glm::radians(.15f);
-  };
 
   while (true) {
     for (SDL_Event event; SDL_PollEvent(&event);) {
@@ -449,7 +465,6 @@ int main(int argc, char **argv) try {
     last_frame_start = now;
     if (!paused)
       time += dt;
-    update_view_parameters(dt);
 
     glm::mat4 model(1.f);
     glUseProgram(program);
@@ -466,14 +481,20 @@ int main(int argc, char **argv) try {
     float near = 0.01f;
     float far = 5000.f;
 
-    glm::mat4 view(1.f);
-    view = glm::translate(view, {0.f, 0.f, -camera_distance});
-    view = glm::rotate(view, view_elevation, {1.f, 0.f, 0.f});
-    view = glm::rotate(view, view_azimuth, {0.f, 1.f, 0.f});
+    player.update(button_down, dt);
+
+    auto cords = player.coords;
+
+    auto view = glm::lookAt(
+        cords,
+        cords + glm::vec3(sin(player.alpha) * sin(player.gamma), cos(player.gamma), cos(player.alpha) * sin(player.gamma)),
+        glm::vec3(0, 1, 0)
+    );
 
     glm::mat4 projection = glm::mat4(1.f);
     projection = glm::perspective(glm::pi<float>() / 2.f, (1.f * width) / height, near, far);
     glm::vec3 sun_direction = glm::normalize(glm::vec3(std::sin(time * 0.5f), 2.f, std::cos(time * 0.5f)));
+
     glm::vec3 camera_position = (glm::inverse(view) * glm::vec4(0.f, 0.f, 0.f, 1.f)).xyz();
 
     glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
