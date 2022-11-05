@@ -22,6 +22,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "shaders.hpp"
 #include "tiny_obj_loader.hpp"
 #include "stb_image.h"
 
@@ -42,10 +43,6 @@ const std::string texture_path = "../textures";
 const auto pi = (float) acos(-1);
 const auto eps = (float) 0.01;
 
-struct vec3 {
-  tinyobj::real_t x, y, z;
-};
-
 struct Segment {
   size_t l, r;
 };
@@ -64,204 +61,10 @@ struct obj_data {
 
   std::vector<float> glossiness;
   std::vector<float> power;
+
+  std::vector<glm::vec3> bounding_box;
+  glm::vec3 C; // центр bounding_box
 };
-
-namespace Logger {
-template<typename T>
-void log(T n) {
-  std::cout << n << std::endl;
-  std::cerr << n << std::endl;
-}
-
-template<typename T, typename ...Args>
-void log(const T &n, const Args &... rest) {
-  std::cout << n << " ";
-  std::cerr << n << " ";
-  log(rest...);
-}
-};
-
-std::string to_string(std::string_view str) {
-  return std::string(str.begin(), str.end());
-}
-
-void sdl2_fail(std::string_view message) {
-  throw std::runtime_error(to_string(message) + SDL_GetError());
-}
-
-void glew_fail(std::string_view message, GLenum error) {
-  throw std::runtime_error(to_string(message) + reinterpret_cast<const char *>(glewGetErrorString(error)));
-}
-
-const std::string vertex_shader_source = R"(
-    #version 330 core
-
-    uniform mat4 model;
-    uniform mat4 view;
-    uniform mat4 projection;
-
-    layout (location = 0) in vec3 in_position;
-    layout (location = 1) in vec3 in_normal;
-    layout (location = 2) in vec2 in_texcoord;
-
-    out vec3 position;
-    out vec3 normal;
-    out vec2 texcoord;
-
-    void main() {
-        gl_Position = projection * view * model * vec4(in_position, 1.0);
-
-        position = (model * vec4(in_position, 1.0)).xyz;
-        normal = normalize((model * vec4(in_normal, 0.0)).xyz);
-        texcoord = in_texcoord;
-    }
-)";
-
-const std::string fragment_shader_source = R"(
-    #version 330 core
-
-    in vec3 position;
-    in vec3 normal;
-    in vec2 texcoord;
-
-    // удаленный источник
-    uniform vec3 sun_color;
-    uniform vec3 camera_position;
-    uniform vec3 sun_direction;
-
-    // точечный источник
-    uniform float glossiness;
-    uniform float power;
-
-    uniform vec3 point_light_attenuation;
-    uniform vec3 point_light_color;
-    uniform vec3 point_light_position;
-
-    uniform sampler2D sampler;
-
-    layout (location = 0) out vec4 out_color;
-
-    vec3 diffuse(vec3 direction, vec3 albedo) {
-      return albedo * max(0.0, dot(normal, direction));
-    }
-
-    vec3 specular(vec3 direction, vec3 albedo) {
-        vec3 reflected_direction = 2.0 * normal *  dot(normal, direction) - direction;
-        vec3 view_direction = normalize(camera_position - position);
-        return glossiness * albedo * pow(max(0.0, dot(reflected_direction, view_direction)), power);
-    }
-
-    void main() {
-          vec3 albedo = texture(sampler, texcoord).xyz;
-
-          vec3 point_light_direction = point_light_position - position;
-          float dist = length(point_light_direction);
-          point_light_direction /= dist;
-
-          float c0 = point_light_attenuation.x;
-          float c1 = point_light_attenuation.y;
-          float c2 = point_light_attenuation.z;
-          float attenuation = 1 / (c0 + c1 * dist + c2 * dist * dist);
-          float attenuation_limit = 1.5f;
-          if (attenuation > attenuation_limit) attenuation = attenuation_limit;
-
-          float ambient_light = 0.2;
-          vec3 ambient = albedo * ambient_light;
-          vec3 color = ambient;
-
-          color += diffuse(sun_direction, albedo) * sun_color;
-          color += specular(sun_direction, albedo) * sun_color;
-          color += diffuse(point_light_direction, albedo) * point_light_color * attenuation;
-          color += specular(point_light_direction, albedo) * point_light_color * attenuation;
-
-          out_color = vec4(color, 1.0);
-    }
-)";
-
-template<class T>
-void bindData(GLuint array_type, GLuint vbo, GLuint vao, const std::vector<T> &vec) {
-  glBindVertexArray(vao);
-  glBindBuffer(array_type, vbo);
-  glBufferData(array_type, sizeof(T) * vec.size(), vec.data(), GL_STATIC_DRAW);
-}
-
-template<class T>
-void bindArgument(GLuint array_type, GLuint vbo, GLuint vao, size_t arg, GLint size, GLenum type, GLboolean norm, const GLvoid *pointer) {
-  glBindVertexArray(vao);
-  glBindBuffer(array_type, vbo);
-  glEnableVertexAttribArray(arg);
-  glVertexAttribPointer(arg, size, type, norm, sizeof(T), pointer);
-}
-
-GLuint create_shader(GLenum type, const char *source) {
-  GLuint result = glCreateShader(type);
-  glShaderSource(result, 1, &source, nullptr);
-  glCompileShader(result);
-  GLint status;
-  glGetShaderiv(result, GL_COMPILE_STATUS, &status);
-  if (status != GL_TRUE) {
-    GLint info_log_length;
-    glGetShaderiv(result, GL_INFO_LOG_LENGTH, &info_log_length);
-    std::string info_log(info_log_length, '\0');
-    glGetShaderInfoLog(result, info_log.size(), nullptr, info_log.data());
-    throw std::runtime_error("Shader compilation failed: " + info_log);
-  }
-  return result;
-}
-
-GLuint create_program(GLuint vertex_shader, GLuint fragment_shader) {
-  GLuint result = glCreateProgram();
-  glAttachShader(result, vertex_shader);
-  glAttachShader(result, fragment_shader);
-  glLinkProgram(result);
-
-  GLint status;
-  glGetProgramiv(result, GL_LINK_STATUS, &status);
-  if (status != GL_TRUE) {
-    GLint info_log_length;
-    glGetProgramiv(result, GL_INFO_LOG_LENGTH, &info_log_length);
-    std::string info_log(info_log_length, '\0');
-    glGetProgramInfoLog(result, info_log.size(), nullptr, info_log.data());
-    throw std::runtime_error("Program linkage failed: " + info_log);
-  }
-
-  return result;
-}
-
-using TextureKeeper = std::map<std::string, GLuint>;
-
-TextureKeeper loadTextures(const std::string &path) {
-  TextureKeeper result;
-  for (int i = 0; const auto &dirEntry : std::filesystem::directory_iterator(path)) {
-    GLuint texture;
-    glGenTextures(1, &texture);
-    glActiveTexture(GL_TEXTURE0 + i);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
-
-    int width;
-    int height;
-    int comp;
-    stbi_uc *pixels = stbi_load(dirEntry.path().c_str(), &width, &height, &comp, 4);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    stbi_image_free(pixels);
-
-    std::string current_path;
-    for (int j = 3; j < dirEntry.path().string().size(); ++j) {
-      if (dirEntry.path().string()[j] == '/') {
-        current_path += '\\';
-      } else {
-        current_path += dirEntry.path().string()[j];
-      }
-    }
-
-    result[current_path] = i++;
-  };
-
-  return result;
-}
 
 obj_data parse_scene(const tinyobj::attrib_t &attrib,
                      const std::vector<tinyobj::shape_t> &shapes,
@@ -272,6 +75,10 @@ obj_data parse_scene(const tinyobj::attrib_t &attrib,
   std::vector<size_t> texture_unit_ids;
   std::vector<float> glossiness;
   std::vector<float> power;
+
+  float x[2] = {std::numeric_limits<float>::max(), std::numeric_limits<float>::min()};
+  float y[2] = {std::numeric_limits<float>::max(), std::numeric_limits<float>::min()};
+  float z[2] = {std::numeric_limits<float>::max(), std::numeric_limits<float>::min()};
 
   for (const auto &shape : shapes) {
     size_t index_offset = 0;
@@ -286,12 +93,20 @@ obj_data parse_scene(const tinyobj::attrib_t &attrib,
       auto fv = size_t(shape.mesh.num_face_vertices[f]);
 
       for (size_t v = 0; v < fv; ++v) {
-
         tinyobj::index_t idx = shape.mesh.indices[index_offset + v];
 
         tinyobj::real_t vx = attrib.vertices[3 * size_t(idx.vertex_index) + 0];
         tinyobj::real_t vy = attrib.vertices[3 * size_t(idx.vertex_index) + 1];
         tinyobj::real_t vz = attrib.vertices[3 * size_t(idx.vertex_index) + 2];
+
+        x[0] = std::min(x[0], vx);
+        x[1] = std::max(x[1], vx);
+
+        y[0] = std::min(y[0], vy);
+        y[1] = std::max(y[1], vy);
+
+        z[0] = std::min(z[0], vz);
+        z[1] = std::max(z[1], vz);
 
         assert(idx.normal_index >= 0);
         tinyobj::real_t nx = attrib.normals[3 * size_t(idx.normal_index) + 0];
@@ -301,11 +116,6 @@ obj_data parse_scene(const tinyobj::attrib_t &attrib,
         assert(idx.texcoord_index >= 0);
         tinyobj::real_t tx = attrib.texcoords[2 * size_t(idx.texcoord_index) + 0];
         tinyobj::real_t ty = attrib.texcoords[2 * size_t(idx.texcoord_index) + 1];
-
-        // Optional: vertex colors
-//        tinyobj::real_t red = attrib.colors[3 * size_t(idx.vertex_index) + 0];
-//        tinyobj::real_t green = attrib.colors[3 * size_t(idx.vertex_index) + 1];
-//        tinyobj::real_t blue = attrib.colors[3 * size_t(idx.vertex_index) + 2];
 
         vertices.push_back(obj_data::vertex{
             .position = {vx, vy, vz},
@@ -325,12 +135,22 @@ obj_data parse_scene(const tinyobj::attrib_t &attrib,
     });
   }
 
+  std::vector<glm::vec3> bounding_box;
+  for (float i : x)
+    for (float j : y)
+      for (float k : z)
+        bounding_box.emplace_back(i, j, k);
+
+  glm::vec3 C{(x[0] + x[1]) / 2, (y[0] + y[1]) / 2, (z[0] + z[1]) / 2};
+
   return obj_data{
       .vertices = vertices,
       .segments = segments,
       .texture_ids = texture_unit_ids,
       .glossiness = glossiness,
-      .power = power
+      .power = power,
+      .bounding_box = bounding_box,
+      .C = C
   };
 }
 
@@ -372,7 +192,7 @@ int main(int argc, char **argv) try {
   if (SDL_Init(SDL_INIT_VIDEO) != 0)
     sdl2_fail("SDL_Init: ");
 
-  // Рутина по созданию окна
+  // *** Рутина по созданию окна
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -408,7 +228,7 @@ int main(int argc, char **argv) try {
   glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &texture_units);
   Logger::log("Count texture units =", texture_units);
 
-  // Создаем шейдеры
+  // *** Создаем шейдеры сцены
   auto vertex_shader = create_shader(GL_VERTEX_SHADER, vertex_shader_source.data());
   auto fragment_shader = create_shader(GL_FRAGMENT_SHADER, fragment_shader_source.data());
   auto program = create_program(vertex_shader, fragment_shader);
@@ -422,10 +242,11 @@ int main(int argc, char **argv) try {
   GLuint camera_position_location = glGetUniformLocation(program, "camera_position");
   GLuint power_location = glGetUniformLocation(program, "power");
   GLuint glossiness_location = glGetUniformLocation(program, "glossiness");
-
   GLuint point_light_position_location = glGetUniformLocation(program, "point_light_position");
   GLuint point_light_color_location = glGetUniformLocation(program, "point_light_color");
   GLuint point_light_attenuation_location = glGetUniformLocation(program, "point_light_attenuation");
+  GLuint shadow_map_location = glGetUniformLocation(program, "shadow_map");
+  GLuint transform_location = glGetUniformLocation(program, "transform");
 
   glUseProgram(program);
 
@@ -433,8 +254,14 @@ int main(int argc, char **argv) try {
     throw std::runtime_error("Error: please, specify scene path");
   }
 
-  // Загрузка текстур и сцены
+  // *** Загрузка текстур и сцены
   auto textures = loadTextures(texture_path);
+  uint32_t max_not_free_unit = 0;
+  for (const auto &[i, j] : textures) {
+    max_not_free_unit = std::max(max_not_free_unit, j);
+  }
+  Logger::log("[max_not_free_unit] =", max_not_free_unit);
+
   const auto scene_path = std::string{argv[1]};
   Logger::log("[scene_path] =", scene_path);
 
@@ -455,7 +282,7 @@ int main(int argc, char **argv) try {
 
   obj_data scene = parse_scene(attrib, shapes, materials, textures);
 
-  // Привязываем сцену к vbo, vao, ebo
+  // *** Привязываем сцену к vbo, vao, ebo
   GLuint vao, vbo;
   glGenVertexArrays(1, &vao);
   glGenBuffers(1, &vbo);
@@ -463,11 +290,53 @@ int main(int argc, char **argv) try {
   bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 0, 3, GL_FLOAT, GL_FALSE, (void *) nullptr); // точка
   bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 1, 3, GL_FLOAT, GL_FALSE, (void *) 12); // нормаль
   bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 2, 2, GL_FLOAT, GL_FALSE, (void *) 24); // текстурные координаты
-
   bindData(GL_ARRAY_BUFFER, vbo, vao, scene.vertices);
 
-  float time = 0.f;
 
+  // *** Тень от солнца
+  auto shadow_vertex_shader = create_shader(GL_VERTEX_SHADER, shadow_vertex_shader_source.data());
+  auto shadow_fragment_shader = create_shader(GL_FRAGMENT_SHADER, shadow_fragment_shader_source.data());
+  auto shadow_program = create_program(shadow_vertex_shader, shadow_fragment_shader);
+  GLuint shadow_model_location = glGetUniformLocation(shadow_program, "model");
+  GLuint shadow_transform_location = glGetUniformLocation(shadow_program, "transform");
+
+  const int sun_texture_unit = GL_TEXTURE0 + 90;
+  GLsizei shadow_map_resolution = 1024;
+  GLuint shadow_map;
+  glGenTextures(1, &shadow_map);
+  glActiveTexture(sun_texture_unit);
+  glBindTexture(GL_TEXTURE_2D, shadow_map);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, shadow_map_resolution, shadow_map_resolution, 0, GL_RGBA, GL_FLOAT, nullptr);
+
+  GLuint rbo;
+  glGenRenderbuffers(1, &rbo);
+  glBindRenderbuffer(GL_RENDERBUFFER, rbo);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, shadow_map_resolution, shadow_map_resolution);
+
+  GLuint shadow_fbo;
+  glGenFramebuffers(1, &shadow_fbo);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, shadow_fbo);
+  glFramebufferTexture(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, shadow_map, 0);
+  glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbo);
+
+  if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    throw std::runtime_error("Incomplete framebuffer!");
+
+  // *** Дебажный прямоугольник
+  auto debug_vertex_shader = create_shader(GL_VERTEX_SHADER, debug_vertex_shader_source);
+  auto debug_fragment_shader = create_shader(GL_FRAGMENT_SHADER, debug_fragment_shader_source);
+  auto debug_program = create_program(debug_vertex_shader, debug_fragment_shader);
+  GLuint debug_shadow_map_location = glGetUniformLocation(debug_program, "shadow_map");
+  glUseProgram(debug_program);
+  glUniform1i(debug_shadow_map_location, sun_texture_unit);
+  GLuint debug_vao;
+  glGenVertexArrays(1, &debug_vao);
+
+  float time = 0.f;
   std::map<SDL_Keycode, bool> button_down;
   auto last_frame_start = std::chrono::high_resolution_clock::now();
   Player player;
@@ -475,14 +344,14 @@ int main(int argc, char **argv) try {
   bool running = true;
   bool paused = false;
 
-  while (true) {
+  auto poll_events = [&running, &height, &width, &paused, &button_down]() {
     for (SDL_Event event; SDL_PollEvent(&event);) {
       switch (event.type) {
         case SDL_QUIT:running = false;
           break;
         case SDL_WINDOWEVENT:
           switch (event.window.event) {
-            case SDL_WINDOWEVENT_RESIZED:width = event.window.data1;
+            case SDL_WINDOWEVENT_RESIZED: width = event.window.data1;
               height = event.window.data2;
               glViewport(0, 0, width, height);
               break;
@@ -498,6 +367,10 @@ int main(int argc, char **argv) try {
           break;
       }
     }
+  };
+
+  while (true) {
+    poll_events();
     if (!running) break;
 
     auto now = std::chrono::high_resolution_clock::now();
@@ -505,50 +378,86 @@ int main(int argc, char **argv) try {
     last_frame_start = now;
     if (!paused)
       time += dt;
-
-    glm::mat4 model(1.f);
-    glUseProgram(program);
-    glClearColor(0.8, 0.8, 0.9, 0.f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LEQUAL);
-
-    glViewport(0, 0, width, height);
-
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-
-    float near = 0.01f;
-    float far = 5000.f;
-
     player.update(button_down, dt);
 
+    glm::mat4 model(1.f);
+    float near = 0.01f;
+    float far = 5000.f;
     auto cords = player.coords;
-
     auto view = glm::lookAt(
         cords,
         cords + glm::vec3(sin(player.alpha) * sin(player.gamma), cos(player.gamma), cos(player.alpha) * sin(player.gamma)),
         glm::vec3(0, 1, 0)
     );
-
     glm::mat4 projection = glm::mat4(1.f);
     projection = glm::perspective(glm::pi<float>() / 2.f, (1.f * width) / height, near, far);
+
     glm::vec3 sun_direction = glm::normalize(glm::vec3(std::sin(time * 0.5f), 2.f, std::cos(time * 0.5f)));
-
     glm::vec3 camera_position = (glm::inverse(view) * glm::vec4(0.f, 0.f, 0.f, 1.f)).xyz();
+    glm::vec3 light_direction = sun_direction;
+    glm::vec3 light_z = -light_direction;
+    glm::vec3 light_x = glm::normalize(glm::cross(light_z, {0.f, 1.f, 0.f}));
+    glm::vec3 light_y = glm::cross(light_x, light_z);
 
+    float dz = 0;
+    float dx = 0;
+    float dy = 0;
+    auto C = scene.C;
+    for (auto V : scene.bounding_box) {
+      auto vec = V - C;
+      dz = std::max(dz, glm::dot(vec, light_z));
+      dx = std::max(dx, glm::dot(vec, light_x));
+      dy = std::max(dy, glm::dot(vec, light_y));
+    }
+
+    glm::mat4 transform = glm::inverse(glm::mat4({
+                                                     {dx * light_x.x, dx * light_x.y, dx * light_x.z, 0.f},
+                                                     {dy * light_y.x, dy * light_y.y, dy * light_y.z, 0.f},
+                                                     {dz * light_z.x, dz * light_z.y, dz * light_z.z, 0.f},
+                                                     {C.x, C.y, C.z, 1.f}
+                                                 }));
+    // Рисуем сцену в shadow_map солнца
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, shadow_fbo);
+    glClearColor(1.f, 1.f, 0.f, 0.f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glViewport(0, 0, shadow_map_resolution, shadow_map_resolution);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glUseProgram(shadow_program);
+    glUniformMatrix4fv(shadow_model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+    glUniformMatrix4fv(shadow_transform_location, 1, GL_FALSE, reinterpret_cast<float *>(&transform));
+    glBindVertexArray(vao);
+    glDrawArrays(GL_TRIANGLES, 0, scene.vertices.size());
+
+    glBindTexture(GL_TEXTURE_2D, shadow_map);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+
+    // Рисуем сцену на экран
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glUseProgram(program);
+    glClearColor(0.8, 0.8, 0.9, 0.f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glViewport(0, 0, width, height);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glUniform1i(shadow_map_location, sun_texture_unit);
+    glUniformMatrix4fv(transform_location, 1, GL_FALSE, reinterpret_cast<float *>(&transform));
     glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
     glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
     glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
     glUniform3f(sun_color_location, .7f, .7f, .7f);
     glUniform3fv(sun_direction_location, 1, reinterpret_cast<float *>(&sun_direction));
     glUniform3fv(camera_position_location, 1, (float *) (&camera_position));
-
     glUniform3f(point_light_position_location, cords.x, cords.y, cords.z);
     glUniform3f(point_light_color_location, 0.0f, 0.9f, 0.0f);
     glUniform3f(point_light_attenuation_location, 0.001f, 0.0001f, 0.0001f);
-
     glBindVertexArray(vao);
+
     for (int j = 0; const auto &i : scene.segments) {
       glUniform1i(sampler_location, scene.texture_ids[j]);
       glUniform1f(power_location, scene.power[j]);
@@ -557,6 +466,10 @@ int main(int argc, char **argv) try {
       j++;
     }
 
+    glUseProgram(debug_program);
+    glUniform1i(debug_shadow_map_location, sun_texture_unit);
+    glBindVertexArray(debug_vao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
     SDL_GL_SwapWindow(window);
   }
 
