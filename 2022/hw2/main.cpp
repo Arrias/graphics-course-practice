@@ -300,11 +300,11 @@ int main(int argc, char **argv) try {
   GLuint shadow_model_location = glGetUniformLocation(shadow_program, "model");
   GLuint shadow_transform_location = glGetUniformLocation(shadow_program, "transform");
 
-  const int sun_texture_unit = GL_TEXTURE0 + 90;
+  const int sun_texture_unit = 90;
   GLsizei shadow_map_resolution = 1024;
   GLuint shadow_map;
   glGenTextures(1, &shadow_map);
-  glActiveTexture(sun_texture_unit);
+  glActiveTexture(GL_TEXTURE0 + sun_texture_unit);
   glBindTexture(GL_TEXTURE_2D, shadow_map);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
