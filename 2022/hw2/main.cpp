@@ -61,6 +61,9 @@ struct obj_data {
   std::vector<vertex> vertices;
   std::vector<Segment> segments; // for every shape [l..r) in vertices
   std::vector<size_t> texture_ids;
+
+  std::vector<float> glossiness;
+  std::vector<float> power;
 };
 
 namespace Logger {
@@ -121,9 +124,19 @@ const std::string fragment_shader_source = R"(
     in vec3 normal;
     in vec2 texcoord;
 
+    // удаленный источник
     uniform vec3 sun_color;
     uniform vec3 camera_position;
     uniform vec3 sun_direction;
+
+    // точечный источник
+    uniform float glossiness;
+    uniform float power;
+
+    uniform vec3 point_light_attenuation;
+    uniform vec3 point_light_color;
+    uniform vec3 point_light_position;
+
     uniform sampler2D sampler;
 
     layout (location = 0) out vec4 out_color;
@@ -133,21 +146,35 @@ const std::string fragment_shader_source = R"(
     }
 
     vec3 specular(vec3 direction, vec3 albedo) {
-        float power = 64.0;
-        vec3 reflected_direction = 2.0 * normal * dot(normal, direction) - direction;
+        vec3 reflected_direction = 2.0 * normal *  dot(normal, direction) - direction;
         vec3 view_direction = normalize(camera_position - position);
-        return albedo * pow(max(0.0, dot(reflected_direction, view_direction)), power);
-    }
-
-    vec3 phong(vec3 direction, vec3 albedo) {
-      return diffuse(direction, albedo) + specular(direction, albedo);
+        return glossiness * albedo * pow(max(0.0, dot(reflected_direction, view_direction)), power);
     }
 
     void main() {
-           vec3 albedo = texture(sampler, texcoord).xyz;
-           float ambient_light = 0.2;
-           vec3 color = albedo * ambient_light + sun_color * phong(sun_direction, albedo);
-           out_color = vec4(color, 1.0);
+          vec3 albedo = texture(sampler, texcoord).xyz;
+
+          vec3 point_light_direction = point_light_position - position;
+          float dist = length(point_light_direction);
+          point_light_direction /= dist;
+
+          float c0 = point_light_attenuation.x;
+          float c1 = point_light_attenuation.y;
+          float c2 = point_light_attenuation.z;
+          float attenuation = 1 / (c0 + c1 * dist + c2 * dist * dist);
+          float attenuation_limit = 1.5f;
+          if (attenuation > attenuation_limit) attenuation = attenuation_limit;
+
+          float ambient_light = 0.2;
+          vec3 ambient = albedo * ambient_light;
+          vec3 color = ambient;
+
+          color += diffuse(sun_direction, albedo) * sun_color;
+          color += specular(sun_direction, albedo) * sun_color;
+          color += diffuse(point_light_direction, albedo) * point_light_color * attenuation;
+          color += specular(point_light_direction, albedo) * point_light_color * attenuation;
+
+          out_color = vec4(color, 1.0);
     }
 )";
 
@@ -243,12 +270,17 @@ obj_data parse_scene(const tinyobj::attrib_t &attrib,
   std::vector<obj_data::vertex> vertices;
   std::vector<Segment> segments;
   std::vector<size_t> texture_unit_ids;
+  std::vector<float> glossiness;
+  std::vector<float> power;
 
   for (const auto &shape : shapes) {
     size_t index_offset = 0;
     auto start_index = vertices.size();
     auto material_id = shape.mesh.material_ids[0];
+
     texture_unit_ids.push_back(texture_keeper[materials[material_id].ambient_texname]);
+    glossiness.push_back(materials[material_id].specular[0]);
+    power.push_back(materials[material_id].shininess);
 
     for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); ++f) {
       auto fv = size_t(shape.mesh.num_face_vertices[f]);
@@ -296,7 +328,9 @@ obj_data parse_scene(const tinyobj::attrib_t &attrib,
   return obj_data{
       .vertices = vertices,
       .segments = segments,
-      .texture_ids = texture_unit_ids
+      .texture_ids = texture_unit_ids,
+      .glossiness = glossiness,
+      .power = power
   };
 }
 
@@ -386,6 +420,12 @@ int main(int argc, char **argv) try {
   GLuint sun_direction_location = glGetUniformLocation(program, "sun_direction");
   GLuint sun_color_location = glGetUniformLocation(program, "sun_color");
   GLuint camera_position_location = glGetUniformLocation(program, "camera_position");
+  GLuint power_location = glGetUniformLocation(program, "power");
+  GLuint glossiness_location = glGetUniformLocation(program, "glossiness");
+
+  GLuint point_light_position_location = glGetUniformLocation(program, "point_light_position");
+  GLuint point_light_color_location = glGetUniformLocation(program, "point_light_color");
+  GLuint point_light_attenuation_location = glGetUniformLocation(program, "point_light_attenuation");
 
   glUseProgram(program);
 
@@ -500,14 +540,21 @@ int main(int argc, char **argv) try {
     glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
     glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
     glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
-    glUniform3f(sun_color_location, 1.f, 1.f, 1.f);
+    glUniform3f(sun_color_location, .7f, .7f, .7f);
     glUniform3fv(sun_direction_location, 1, reinterpret_cast<float *>(&sun_direction));
     glUniform3fv(camera_position_location, 1, (float *) (&camera_position));
 
+    glUniform3f(point_light_position_location, cords.x, cords.y, cords.z);
+    glUniform3f(point_light_color_location, 0.0f, 0.9f, 0.0f);
+    glUniform3f(point_light_attenuation_location, 0.001f, 0.0001f, 0.0001f);
+
     glBindVertexArray(vao);
     for (int j = 0; const auto &i : scene.segments) {
-      glUniform1i(sampler_location, scene.texture_ids[j++]);
+      glUniform1i(sampler_location, scene.texture_ids[j]);
+      glUniform1f(power_location, scene.power[j]);
+      glUniform1f(glossiness_location, scene.glossiness[j]);
       glDrawArrays(GL_TRIANGLES, i.l, i.r - i.l);
+      j++;
     }
 
     SDL_GL_SwapWindow(window);
