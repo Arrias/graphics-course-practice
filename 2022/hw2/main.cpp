@@ -4,6 +4,7 @@
 #else
 
 #define TINYOBJLOADER_IMPLEMENTATION
+#define debug
 
 #include <SDL2/SDL.h>
 
@@ -228,10 +229,26 @@ int main(int argc, char **argv) try {
   glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &texture_units);
   Logger::log("Count texture units =", texture_units);
 
+  GLint maxAtt = 0;
+  glGetIntegerv(GL_MAX_COLOR_ATTACHMENTS, &maxAtt);
+  Logger::log("Max color attachments =", maxAtt);
+
   // *** Создаем шейдеры сцены
   auto vertex_shader = create_shader(GL_VERTEX_SHADER, vertex_shader_source.data());
   auto fragment_shader = create_shader(GL_FRAGMENT_SHADER, fragment_shader_source.data());
   auto program = create_program(vertex_shader, fragment_shader);
+
+  /// *** Создаем шейдеры для тени от точечного источника
+  auto point_shadow_vertex_shader = create_shader(GL_VERTEX_SHADER, point_shadow_vertex_shader_source.data());
+  auto point_shadow_geometry_shader = create_shader(GL_GEOMETRY_SHADER, point_shadow_geometry_shader_source.data());
+  auto point_shadow_fragment_shader = create_shader(GL_FRAGMENT_SHADER, point_shadow_fragment_shader_source.data());
+  auto point_shadow_program =
+      create_program(point_shadow_vertex_shader, point_shadow_fragment_shader, point_shadow_geometry_shader);
+
+  /// *** Создаем шейдеры для тени от солнца
+  auto shadow_vertex_shader = create_shader(GL_VERTEX_SHADER, shadow_vertex_shader_source.data());
+  auto shadow_fragment_shader = create_shader(GL_FRAGMENT_SHADER, shadow_fragment_shader_source.data());
+  auto shadow_program = create_program(shadow_vertex_shader, shadow_fragment_shader);
 
   GLuint model_location = glGetUniformLocation(program, "model");
   GLuint view_location = glGetUniformLocation(program, "view");
@@ -289,18 +306,21 @@ int main(int argc, char **argv) try {
 
   bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 0, 3, GL_FLOAT, GL_FALSE, (void *) nullptr); // точка
   bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 1, 3, GL_FLOAT, GL_FALSE, (void *) 12); // нормаль
-  bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER, vbo, vao, 2, 2, GL_FLOAT, GL_FALSE, (void *) 24); // текстурные координаты
+  bindArgument<obj_data::vertex>(GL_ARRAY_BUFFER,
+                                 vbo,
+                                 vao,
+                                 2,
+                                 2,
+                                 GL_FLOAT,
+                                 GL_FALSE,
+                                 (void *) 24); // текстурные координаты
   bindData(GL_ARRAY_BUFFER, vbo, vao, scene.vertices);
 
-
   // *** Тень от солнца
-  auto shadow_vertex_shader = create_shader(GL_VERTEX_SHADER, shadow_vertex_shader_source.data());
-  auto shadow_fragment_shader = create_shader(GL_FRAGMENT_SHADER, shadow_fragment_shader_source.data());
-  auto shadow_program = create_program(shadow_vertex_shader, shadow_fragment_shader);
   GLuint shadow_model_location = glGetUniformLocation(shadow_program, "model");
   GLuint shadow_transform_location = glGetUniformLocation(shadow_program, "transform");
 
-  const int sun_texture_unit = 90;
+  const int sun_texture_unit = 90; // переименовать, непонятное название
   GLsizei shadow_map_resolution = 1024;
   GLuint shadow_map;
   glGenTextures(1, &shadow_map);
@@ -319,22 +339,54 @@ int main(int argc, char **argv) try {
 
   GLuint shadow_fbo;
   glGenFramebuffers(1, &shadow_fbo);
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, shadow_fbo);
-  glFramebufferTexture(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, shadow_map, 0);
-  glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, shadow_fbo);
+  glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, shadow_map, 0);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rbo);
 
-  if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
     throw std::runtime_error("Incomplete framebuffer!");
 
   // *** Дебажный прямоугольник
   auto debug_vertex_shader = create_shader(GL_VERTEX_SHADER, debug_vertex_shader_source);
   auto debug_fragment_shader = create_shader(GL_FRAGMENT_SHADER, debug_fragment_shader_source);
   auto debug_program = create_program(debug_vertex_shader, debug_fragment_shader);
-  GLuint debug_shadow_map_location = glGetUniformLocation(debug_program, "shadow_map");
-  glUseProgram(debug_program);
-  glUniform1i(debug_shadow_map_location, sun_texture_unit);
+  GLuint debug_sampler_cube_location = glGetUniformLocation(debug_program, "sampler_cube");
   GLuint debug_vao;
   glGenVertexArrays(1, &debug_vao);
+
+
+  /// *** Тень от подвижной точки
+  const int point_shadow_texture_unit = 95;
+  GLuint point_shadow_model_location = glGetUniformLocation(point_shadow_program, "model");
+  GLuint point_shadow_shadow_matrices_location = glGetUniformLocation(point_shadow_program, "shadowMatrices");
+  GLuint point_shadow_light_pos_location = glGetUniformLocation(point_shadow_program, "lightPos");
+  GLuint point_shadow_far_plane_location = glGetUniformLocation(point_shadow_program, "far_plane");
+
+  GLsizei point_shadow_resolution = 512;
+
+  GLuint depthCubemap;
+  glGenTextures(1, &depthCubemap);
+  glActiveTexture(GL_TEXTURE0 + point_shadow_texture_unit);
+  glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubemap);
+  for (int i = 0; i < 6; ++i) {
+    glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_DEPTH_COMPONENT,
+                 point_shadow_resolution, point_shadow_resolution, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+
+  }
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+  GLuint depthMapFBO;
+  glGenFramebuffers(1, &depthMapFBO);
+  glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+  glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthCubemap, 0);
+  glDrawBuffer(GL_NONE);
+  glReadBuffer(GL_NONE);
+
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    throw std::runtime_error("Incomplete framebuffer!");
 
   float time = 0.f;
   std::map<SDL_Keycode, bool> button_down;
@@ -369,7 +421,11 @@ int main(int argc, char **argv) try {
     }
   };
 
+  std::vector<float> writedCube(point_shadow_resolution * point_shadow_resolution);
+  int iter = 0;
+
   while (true) {
+    ++iter;
     poll_events();
     if (!running) break;
 
@@ -386,18 +442,19 @@ int main(int argc, char **argv) try {
     auto cords = player.coords;
     auto view = glm::lookAt(
         cords,
-        cords + glm::vec3(sin(player.alpha) * sin(player.gamma), cos(player.gamma), cos(player.alpha) * sin(player.gamma)),
+        cords + glm::vec3(sin(player.alpha) * sin(player.gamma),
+                          cos(player.gamma),
+                          cos(player.alpha) * sin(player.gamma)),
         glm::vec3(0, 1, 0)
     );
-    glm::mat4 projection = glm::mat4(1.f);
-    projection = glm::perspective(glm::pi<float>() / 2.f, (1.f * width) / height, near, far);
-
+    glm::mat4 projection = glm::perspective(glm::pi<float>() / 2.f, (1.f * width) / height, near, far);
     glm::vec3 sun_direction = glm::normalize(glm::vec3(std::sin(time * 0.5f), 2.f, std::cos(time * 0.5f)));
     glm::vec3 camera_position = (glm::inverse(view) * glm::vec4(0.f, 0.f, 0.f, 1.f)).xyz();
     glm::vec3 light_direction = sun_direction;
-    glm::vec3 light_z = -light_direction;
-    glm::vec3 light_x = glm::normalize(glm::cross(light_z, {0.f, 1.f, 0.f}));
-    glm::vec3 light_y = glm::cross(light_x, light_z);
+
+    auto light_z = -light_direction;
+    auto light_x = glm::normalize(glm::cross(light_z, {0.f, 1.f, 0.f}));
+    auto light_y = glm::cross(light_x, light_z);
 
     float dz = 0;
     float dx = 0;
@@ -416,8 +473,92 @@ int main(int argc, char **argv) try {
                                                      {dz * light_z.x, dz * light_z.y, dz * light_z.z, 0.f},
                                                      {C.x, C.y, C.z, 1.f}
                                                  }));
+
+    auto point_light_position = glm::vec3(std::sin(time * 0.5f) * 1000, 100.f, std::cos(time * 0.5f) * 400);
+    //   Logger::log("point light cords =", cords.x, cords.y, cords.z);
+//    std::vector<glm::mat4> point_shadow_transforms;
+//    for (int i = 0; i < 3; ++i) {
+//      for (float j : {-1.f, 1.f}) {
+//        glm::vec3 direction(0.0, 0.0, 0.0);
+//        glm::vec3 up(0.0, 0.0, 0.0);
+//        direction[i] = j;
+//        up[(i + 1) % 3] = -1.f;
+//        point_shadow_transforms.push_back(
+//            projection * glm::lookAt(
+//                point_light_position,
+//                point_light_position + direction,
+//                up
+//            )
+//        );
+//      }
+//    }
+
+    std::vector<glm::mat4> shadowTransforms;
+    shadowTransforms.push_back(projection * glm::lookAt(point_light_position,
+                                                        point_light_position + glm::vec3(1.0f, 0.0f, 0.0f),
+                                                        glm::vec3(0.0f, -1.0f, 0.0f)));
+    shadowTransforms.push_back(projection * glm::lookAt(point_light_position,
+                                                        point_light_position + glm::vec3(-1.0f, 0.0f, 0.0f),
+                                                        glm::vec3(0.0f, -1.0f, 0.0f)));
+    shadowTransforms.push_back(projection * glm::lookAt(point_light_position,
+                                                        point_light_position + glm::vec3(0.0f, 1.0f, 0.0f),
+                                                        glm::vec3(0.0f, 0.0f, 1.0f)));
+    shadowTransforms.push_back(projection * glm::lookAt(point_light_position,
+                                                        point_light_position + glm::vec3(0.0f, -1.0f, 0.0f),
+                                                        glm::vec3(0.0f, 0.0f, -1.0f)));
+    shadowTransforms.push_back(projection * glm::lookAt(point_light_position,
+                                                        point_light_position + glm::vec3(0.0f, 0.0f, 1.0f),
+                                                        glm::vec3(0.0f, -1.0f, 0.0f)));
+    shadowTransforms.push_back(projection * glm::lookAt(point_light_position,
+                                                        point_light_position + glm::vec3(0.0f, 0.0f, -1.0f),
+                                                        glm::vec3(0.0f, -1.0f, 0.0f)));
+
+    // Рисуем тени от точечного источника
+    glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    glViewport(0, 0, point_shadow_resolution, point_shadow_resolution);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+
+    glUseProgram(point_shadow_program);
+    glUniform3f(point_shadow_light_pos_location, point_light_position.x, point_light_position
+        .y, point_light_position.z);
+    glUniform1f(point_shadow_far_plane_location, far);
+
+    glUniformMatrix4fv(point_shadow_model_location, 1, GL_FALSE, reinterpret_cast<const GLfloat *>(&model));
+//    glUniformMatrix4fv(point_shadow_shadow_matrices_location, 6, GL_FALSE,
+//                       reinterpret_cast<const GLfloat *>(point_shadow_transforms.data()));
+    for (int i = 0; i < 6; ++i) {
+      std::string uni_name = "shadowMatrices[" + std::to_string(i) + "]";
+      glUniformMatrix4fv(glGetUniformLocation(point_shadow_program, uni_name.data()),
+                         1, GL_FALSE, reinterpret_cast<float *>(&shadowTransforms[i]));
+    }
+
+    glBindVertexArray(vao);
+    //glDrawArrays(GL_TRIANGLES, 0, scene.vertices.size());
+
+//    if (iter > 1000) {
+//      // Пытаюсь прочитать, что написалось в cubemap
+//      glActiveTexture(GL_TEXTURE0 + point_shadow_texture_unit);
+//      glGetTexImage(GL_TEXTURE_CUBE_MAP_POSITIVE_X, 0, GL_DEPTH_COMPONENT, GL_FLOAT, writedCube.data());
+//
+//      iter = 0;
+//      std::string curr_map;
+//      for (int i = 0; i < point_shadow_resolution; ++i) {
+//        for (int j = 0; j < point_shadow_resolution; ++j) {
+//          curr_map += std::to_string(writedCube[point_shadow_resolution * i + j]);
+//          curr_map += " ";
+//        }
+//        curr_map += "\n";
+//      }
+//      Logger::log(curr_map);
+//    }
+
     // Рисуем сцену в shadow_map солнца
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, shadow_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, shadow_fbo);
     glClearColor(1.f, 1.f, 0.f, 0.f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glViewport(0, 0, shadow_map_resolution, shadow_map_resolution);
@@ -434,9 +575,8 @@ int main(int argc, char **argv) try {
     glBindTexture(GL_TEXTURE_2D, shadow_map);
     glGenerateMipmap(GL_TEXTURE_2D);
 
-
     // Рисуем сцену на экран
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glUseProgram(program);
     glClearColor(0.8, 0.8, 0.9, 0.f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -453,7 +593,7 @@ int main(int argc, char **argv) try {
     glUniform3f(sun_color_location, .7f, .7f, .7f);
     glUniform3fv(sun_direction_location, 1, reinterpret_cast<float *>(&sun_direction));
     glUniform3fv(camera_position_location, 1, (float *) (&camera_position));
-    glUniform3f(point_light_position_location, cords.x, cords.y, cords.z);
+    glUniform3f(point_light_position_location, point_light_position.x, point_light_position.y, point_light_position.z);
     glUniform3f(point_light_color_location, 0.0f, 0.9f, 0.0f);
     glUniform3f(point_light_attenuation_location, 0.001f, 0.0001f, 0.0001f);
     glBindVertexArray(vao);
@@ -467,7 +607,7 @@ int main(int argc, char **argv) try {
     }
 
     glUseProgram(debug_program);
-    glUniform1i(debug_shadow_map_location, sun_texture_unit);
+    glUniform1i(debug_sampler_cube_location, point_shadow_texture_unit);
     glBindVertexArray(debug_vao);
     glDrawArrays(GL_TRIANGLES, 0, 6);
     SDL_GL_SwapWindow(window);

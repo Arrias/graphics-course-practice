@@ -1,4 +1,5 @@
 Count texture units = 192
+Max color attachments = 8
 [max_not_free_unit] = 53
 [scene_path] = /home/arrias/Projects/graphics/graphics-course-practice/2022/hw2/sponza.obj
 Both `d` and `Tr` parameters defined for "leaf". Use the value of `d` for dissolve (line 8 in .mtl.)

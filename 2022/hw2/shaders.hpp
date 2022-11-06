@@ -43,11 +43,23 @@ const std::string fragment_shader_source = R"(
     // точечный источник
     uniform float glossiness;
     uniform float power;
-
     uniform vec3 point_light_attenuation;
     uniform vec3 point_light_color;
     uniform vec3 point_light_position;
     uniform mat4 transform;
+
+    uniform samplerCube depthMap;
+    uniform float far_plane;
+
+    float ShadowCalculation() {
+        vec3 fragToLight = position - point_light_position;
+        float closestDepth = texture(depthMap, fragToLight).r;
+        closestDepth *= far_plane;
+        float currentDepth = length(fragToLight);
+        float bias = 0.05;
+        float shadow = currentDepth -  bias > closestDepth ? 1.0 : 0.0;
+        return shadow;
+    }
 
     uniform sampler2D sampler;
     uniform sampler2D shadow_map;
@@ -128,8 +140,9 @@ const std::string fragment_shader_source = R"(
           color += diffuse(sun_direction, albedo) * sun_color * shadow_factor;
           color += specular(sun_direction, albedo) * sun_color * shadow_factor;
 
-          color += diffuse(point_light_direction, albedo) * point_light_color * attenuation;
-          color += specular(point_light_direction, albedo) * point_light_color * attenuation;
+          float point_shadow = ShadowCalculation();
+          color += diffuse(point_light_direction, albedo) * point_light_color * attenuation * point_shadow;
+          color += specular(point_light_direction, albedo) * point_light_color * attenuation * point_shadow;
 
           out_color = vec4(color, 1.0);
     }
@@ -160,6 +173,58 @@ void main()
 }
 )";
 
+const std::string point_shadow_vertex_shader_source =
+    R"(
+    #version 330 core
+    layout (location = 0) in vec3 in_position;
+
+    uniform mat4 model;
+
+    void main()
+    {
+        gl_Position = model * vec4(in_position, 1.0);
+    }
+
+    )";
+
+const std::string point_shadow_geometry_shader_source =
+    R"(
+    #version 330 core
+    layout (triangles) in;
+    layout (triangle_strip, max_vertices=18) out;
+
+    out vec4 FragPos;
+    uniform mat4 shadowMatrices[6];
+
+    void main() {
+        for (int face = 0; face < 6; ++face) {
+            gl_Layer = face;
+            for (int i = 0; i < 3; ++i) {
+                FragPos = gl_in[i].gl_Position;
+                gl_Position = shadowMatrices[face] * FragPos;
+                EmitVertex();
+            }
+            EndPrimitive();
+        }
+    }
+
+    )";
+
+const std::string point_shadow_fragment_shader_source =
+    R"(
+    #version 330 core
+
+    in vec4 FragPos;
+    uniform vec3 lightPos;
+    uniform float far_plane;
+
+    void main() {
+        float lightDistance = length(FragPos.xyz-lightPos);
+        lightDistance /= far_plane;
+        gl_FragDepth = lightDistance;
+    }
+    )";
+
 const char debug_vertex_shader_source[] =
     R"(#version 330 core
 vec2 vertices[6] = vec2[6](
@@ -181,27 +246,32 @@ void main()
 
 const char debug_fragment_shader_source[] =
     R"(#version 330 core
-uniform sampler2D shadow_map;
+uniform samplerCube sampler_cube;
 in vec2 texcoord;
 layout (location = 0) out vec4 out_color;
 void main()
 {
-    out_color = vec4(texture(shadow_map, texcoord).rgb, 1.0);
+    vec3 cubemap_pos = vec3(texcoord.x ,-10.0, texcoord.y);
+    out_color = vec4(texture(sampler_cube, cubemap_pos).rgb, 1.0);
 }
 )";
 
 namespace Logger {
 template<typename T>
 void log(T n) {
+#ifdef debug
   std::cout << n << std::endl;
   std::cerr << n << std::endl;
+#endif
 }
 
 template<typename T, typename ...Args>
 void log(const T &n, const Args &... rest) {
+#ifdef debug
   std::cout << n << " ";
   std::cerr << n << " ";
   log(rest...);
+#endif
 }
 };
 
@@ -225,7 +295,14 @@ void bindData(GLuint array_type, GLuint vbo, GLuint vao, const std::vector<T> &v
 }
 
 template<class T>
-void bindArgument(GLuint array_type, GLuint vbo, GLuint vao, size_t arg, GLint size, GLenum type, GLboolean norm, const GLvoid *pointer) {
+void bindArgument(GLuint array_type,
+                  GLuint vbo,
+                  GLuint vao,
+                  size_t arg,
+                  GLint size,
+                  GLenum type,
+                  GLboolean norm,
+                  const GLvoid *pointer) {
   glBindVertexArray(vao);
   glBindBuffer(array_type, vbo);
   glEnableVertexAttribArray(arg);
@@ -248,10 +325,15 @@ GLuint create_shader(GLenum type, const char *source) {
   return result;
 }
 
-GLuint create_program(GLuint vertex_shader, GLuint fragment_shader) {
+GLuint create_program(GLuint vertex_shader, GLuint fragment_shader,
+                      std::optional<GLuint> geometry_shader = std::nullopt) {
   GLuint result = glCreateProgram();
   glAttachShader(result, vertex_shader);
   glAttachShader(result, fragment_shader);
+  if (geometry_shader.has_value()) {
+    glAttachShader(result, *geometry_shader);
+  }
+
   glLinkProgram(result);
 
   GLint status;
