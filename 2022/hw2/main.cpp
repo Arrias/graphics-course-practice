@@ -65,6 +65,7 @@ struct obj_data {
 
   std::vector<glm::vec3> bounding_box;
   glm::vec3 C; // центр bounding_box
+  std::vector<size_t> alpha_ids;
 };
 
 obj_data parse_scene(const tinyobj::attrib_t &attrib,
@@ -76,6 +77,7 @@ obj_data parse_scene(const tinyobj::attrib_t &attrib,
   std::vector<size_t> texture_unit_ids;
   std::vector<float> glossiness;
   std::vector<float> power;
+  std::vector<size_t> alpha_ids;
 
   float x[2] = {std::numeric_limits<float>::max(), std::numeric_limits<float>::min()};
   float y[2] = {std::numeric_limits<float>::max(), std::numeric_limits<float>::min()};
@@ -89,6 +91,7 @@ obj_data parse_scene(const tinyobj::attrib_t &attrib,
     texture_unit_ids.push_back(texture_keeper[materials[material_id].ambient_texname]);
     glossiness.push_back(materials[material_id].specular[0]);
     power.push_back(materials[material_id].shininess);
+    alpha_ids.push_back(texture_keeper[materials[material_id].alpha_texname]);
 
     for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); ++f) {
       auto fv = size_t(shape.mesh.num_face_vertices[f]);
@@ -151,7 +154,8 @@ obj_data parse_scene(const tinyobj::attrib_t &attrib,
       .glossiness = glossiness,
       .power = power,
       .bounding_box = bounding_box,
-      .C = C
+      .C = C,
+      .alpha_ids = alpha_ids
   };
 }
 
@@ -319,6 +323,7 @@ int main(int argc, char **argv) try {
   // *** Тень от солнца
   GLuint shadow_model_location = glGetUniformLocation(shadow_program, "model");
   GLuint shadow_transform_location = glGetUniformLocation(shadow_program, "transform");
+  GLuint shadow_map_d_location = glGetUniformLocation(shadow_program, "map_d");
 
   const int sun_texture_unit = 90; // переименовать, непонятное название
   GLsizei shadow_map_resolution = 1024;
@@ -363,30 +368,6 @@ int main(int argc, char **argv) try {
   GLuint point_shadow_far_plane_location = glGetUniformLocation(point_shadow_program, "far_plane");
 
   GLsizei point_shadow_resolution = 512;
-
-  GLuint depthCubemap;
-  glGenTextures(1, &depthCubemap);
-  glActiveTexture(GL_TEXTURE0 + point_shadow_texture_unit);
-  glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubemap);
-  for (int i = 0; i < 6; ++i) {
-    glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_DEPTH_COMPONENT,
-                 point_shadow_resolution, point_shadow_resolution, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-
-  }
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-  GLuint depthMapFBO;
-  glGenFramebuffers(1, &depthMapFBO);
-  glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
-  glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthCubemap, 0);
-  glDrawBuffer(GL_NONE);
-  glReadBuffer(GL_NONE);
-
-  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-    throw std::runtime_error("Incomplete framebuffer!");
 
   float time = 0.f;
   std::map<SDL_Keycode, bool> button_down;
@@ -475,87 +456,6 @@ int main(int argc, char **argv) try {
                                                  }));
 
     auto point_light_position = glm::vec3(std::sin(time * 0.5f) * 1000, 100.f, std::cos(time * 0.5f) * 400);
-    //   Logger::log("point light cords =", cords.x, cords.y, cords.z);
-//    std::vector<glm::mat4> point_shadow_transforms;
-//    for (int i = 0; i < 3; ++i) {
-//      for (float j : {-1.f, 1.f}) {
-//        glm::vec3 direction(0.0, 0.0, 0.0);
-//        glm::vec3 up(0.0, 0.0, 0.0);
-//        direction[i] = j;
-//        up[(i + 1) % 3] = -1.f;
-//        point_shadow_transforms.push_back(
-//            projection * glm::lookAt(
-//                point_light_position,
-//                point_light_position + direction,
-//                up
-//            )
-//        );
-//      }
-//    }
-
-    std::vector<glm::mat4> shadowTransforms;
-    shadowTransforms.push_back(projection * glm::lookAt(point_light_position,
-                                                        point_light_position + glm::vec3(1.0f, 0.0f, 0.0f),
-                                                        glm::vec3(0.0f, -1.0f, 0.0f)));
-    shadowTransforms.push_back(projection * glm::lookAt(point_light_position,
-                                                        point_light_position + glm::vec3(-1.0f, 0.0f, 0.0f),
-                                                        glm::vec3(0.0f, -1.0f, 0.0f)));
-    shadowTransforms.push_back(projection * glm::lookAt(point_light_position,
-                                                        point_light_position + glm::vec3(0.0f, 1.0f, 0.0f),
-                                                        glm::vec3(0.0f, 0.0f, 1.0f)));
-    shadowTransforms.push_back(projection * glm::lookAt(point_light_position,
-                                                        point_light_position + glm::vec3(0.0f, -1.0f, 0.0f),
-                                                        glm::vec3(0.0f, 0.0f, -1.0f)));
-    shadowTransforms.push_back(projection * glm::lookAt(point_light_position,
-                                                        point_light_position + glm::vec3(0.0f, 0.0f, 1.0f),
-                                                        glm::vec3(0.0f, -1.0f, 0.0f)));
-    shadowTransforms.push_back(projection * glm::lookAt(point_light_position,
-                                                        point_light_position + glm::vec3(0.0f, 0.0f, -1.0f),
-                                                        glm::vec3(0.0f, -1.0f, 0.0f)));
-
-    // Рисуем тени от точечного источника
-    glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
-    glClear(GL_DEPTH_BUFFER_BIT);
-    glViewport(0, 0, point_shadow_resolution, point_shadow_resolution);
-
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LEQUAL);
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-
-    glUseProgram(point_shadow_program);
-    glUniform3f(point_shadow_light_pos_location, point_light_position.x, point_light_position
-        .y, point_light_position.z);
-    glUniform1f(point_shadow_far_plane_location, far);
-
-    glUniformMatrix4fv(point_shadow_model_location, 1, GL_FALSE, reinterpret_cast<const GLfloat *>(&model));
-//    glUniformMatrix4fv(point_shadow_shadow_matrices_location, 6, GL_FALSE,
-//                       reinterpret_cast<const GLfloat *>(point_shadow_transforms.data()));
-    for (int i = 0; i < 6; ++i) {
-      std::string uni_name = "shadowMatrices[" + std::to_string(i) + "]";
-      glUniformMatrix4fv(glGetUniformLocation(point_shadow_program, uni_name.data()),
-                         1, GL_FALSE, reinterpret_cast<float *>(&shadowTransforms[i]));
-    }
-
-    glBindVertexArray(vao);
-    //glDrawArrays(GL_TRIANGLES, 0, scene.vertices.size());
-
-//    if (iter > 1000) {
-//      // Пытаюсь прочитать, что написалось в cubemap
-//      glActiveTexture(GL_TEXTURE0 + point_shadow_texture_unit);
-//      glGetTexImage(GL_TEXTURE_CUBE_MAP_POSITIVE_X, 0, GL_DEPTH_COMPONENT, GL_FLOAT, writedCube.data());
-//
-//      iter = 0;
-//      std::string curr_map;
-//      for (int i = 0; i < point_shadow_resolution; ++i) {
-//        for (int j = 0; j < point_shadow_resolution; ++j) {
-//          curr_map += std::to_string(writedCube[point_shadow_resolution * i + j]);
-//          curr_map += " ";
-//        }
-//        curr_map += "\n";
-//      }
-//      Logger::log(curr_map);
-//    }
 
     // Рисуем сцену в shadow_map солнца
     glBindFramebuffer(GL_FRAMEBUFFER, shadow_fbo);
@@ -570,6 +470,12 @@ int main(int argc, char **argv) try {
     glUniformMatrix4fv(shadow_model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
     glUniformMatrix4fv(shadow_transform_location, 1, GL_FALSE, reinterpret_cast<float *>(&transform));
     glBindVertexArray(vao);
+
+    for (int j = 0; const auto &i : scene.segments) {
+      glUniform1i(shadow_map_d_location, scene.alpha_ids[j]);
+      glDrawArrays(GL_TRIANGLES, i.l, i.r - i.l);
+      j++;
+    }
     glDrawArrays(GL_TRIANGLES, 0, scene.vertices.size());
 
     glBindTexture(GL_TEXTURE_2D, shadow_map);
@@ -606,10 +512,10 @@ int main(int argc, char **argv) try {
       j++;
     }
 
-    glUseProgram(debug_program);
-    glUniform1i(debug_sampler_cube_location, point_shadow_texture_unit);
-    glBindVertexArray(debug_vao);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+//    glUseProgram(debug_program);
+//    glUniform1i(debug_sampler_cube_location, point_shadow_texture_unit);
+//    glBindVertexArray(debug_vao);
+//    glDrawArrays(GL_TRIANGLES, 0, 6);
     SDL_GL_SwapWindow(window);
   }
 

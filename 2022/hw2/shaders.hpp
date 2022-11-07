@@ -153,19 +153,25 @@ const std::string shadow_vertex_shader_source =
 uniform mat4 model;
 uniform mat4 transform;
 layout (location = 0) in vec3 in_position;
+ layout (location = 2) in vec2 in_texcoord;
+
+out vec2 texcoord;
 void main()
 {
     gl_Position = transform * model * vec4(in_position, 1.0);
+    texcoord = vec2(in_texcoord.x, 1 - in_texcoord.y);
 }
 )";
 
 const std::string shadow_fragment_shader_source =
     R"(#version 330 core
 out vec4 out_color;
+uniform sampler2D map_d;
+in vec2 texcoord;
 void main()
 {
+    if(texture2D(map_d, texcoord).x > 0.5) discard;
     float z = gl_FragCoord.z;
-    // добавляем наклон поверхности
     float dF_dx = dFdx(z);
     float dF_dy = dFdy(z);
     float add = 0.25 * (dF_dx * dF_dx + dF_dy * dF_dy);
