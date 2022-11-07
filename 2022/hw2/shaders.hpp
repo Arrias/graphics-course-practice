@@ -53,11 +53,15 @@ const std::string fragment_shader_source = R"(
 
     float ShadowCalculation() {
         vec3 fragToLight = position - point_light_position;
+        //return texture(depthMap, fragToLight).r;;
         float closestDepth = texture(depthMap, fragToLight).r;
         closestDepth *= far_plane;
         float currentDepth = length(fragToLight);
-        float bias = 0.05;
-        float shadow = currentDepth -  bias > closestDepth ? 1.0 : 0.0;
+//        //if (currentDepth < 100.f) {
+//          //  return 0.0;
+//        //}
+        float bias = 1.5;
+        float shadow = currentDepth -  bias > closestDepth ? 0.0 : 1.0;
         return shadow;
     }
 
@@ -79,6 +83,10 @@ const std::string fragment_shader_source = R"(
     float C = 0.005;
 
     void main() {
+        //  float zz = gl_FragCoord.z;
+        //  out_color = vec4(zz, 0.0, 0.0, 0.0);
+         // return;
+
           // SUN SHADOW
           vec4 shadow_pos = transform * vec4(position, 1.0);
           shadow_pos /= shadow_pos.w;
