@@ -38,8 +38,6 @@
 #include <glm/gtx/string_cast.hpp>
 
 const std::string log_path = "../log.txt";
-const std::string mtl_path = "../";
-const std::string texture_path = "../textures";
 
 const auto pi = (float) acos(-1);
 const auto eps = (float) 0.01;
@@ -276,15 +274,22 @@ int main(int argc, char **argv) try {
   }
 
   // *** Загрузка текстур и сцены
+  const auto scene_path = std::string{argv[1]};
+  std::string texture_path = scene_path;
+  while (!texture_path.empty() && texture_path.back() != '/') texture_path.pop_back();
+  std::string mtl_path = texture_path;
+  texture_path += "textures";
+
+  Logger::log("[scene_path] =", scene_path);
+  Logger::log("[texture_path] =", texture_path);
+  Logger::log("[mtl_path] =", mtl_path);
+
   auto textures = loadTextures(texture_path);
   uint32_t max_not_free_unit = 0;
   for (const auto &[i, j] : textures) {
     max_not_free_unit = std::max(max_not_free_unit, j);
   }
   Logger::log("[max_not_free_unit] =", max_not_free_unit);
-
-  const auto scene_path = std::string{argv[1]};
-  Logger::log("[scene_path] =", scene_path);
 
   tinyobj::ObjReaderConfig reader_config;
   reader_config.mtl_search_path = mtl_path;

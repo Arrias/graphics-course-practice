@@ -377,16 +377,21 @@ TextureKeeper loadTextures(const std::string &path) {
     glGenerateMipmap(GL_TEXTURE_2D);
     stbi_image_free(pixels);
 
-    std::string current_path;
-    for (int j = 3; j < dirEntry.path().string().size(); ++j) {
-      if (dirEntry.path().string()[j] == '/') {
-        current_path += '\\';
+    std::string current_path = dirEntry.path().string();
+    std::string rel_path;
+
+    for (int j = (int) current_path.size() - 1, cnt = 0; j >= 0 && cnt < 2; --j) {
+      if (current_path[j] == '/') {
+        ++cnt;
+        if (cnt < 2) {
+          rel_path += '\\';
+        }
       } else {
-        current_path += dirEntry.path().string()[j];
+        rel_path += current_path[j];
       }
     }
-
-    result[current_path] = i++;
+    std::reverse(rel_path.begin(), rel_path.end());
+    result[rel_path] = i++;
   };
 
   return result;
