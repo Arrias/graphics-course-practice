@@ -2,7 +2,9 @@
 #include <SDL.h>
 #undef main
 #else
+
 #include <SDL2/SDL.h>
+
 #endif
 
 #include <GL/glew.h>
@@ -17,6 +19,7 @@
 
 #define GLM_FORCE_SWIZZLE
 #define GLM_ENABLE_EXPERIMENTAL
+
 #include <glm/vec3.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/ext/matrix_transform.hpp>
@@ -27,23 +30,20 @@
 #include "obj_parser.hpp"
 #include "stb_image.h"
 
-std::string to_string(std::string_view str)
-{
+std::string to_string(std::string_view str) {
     return std::string(str.begin(), str.end());
 }
 
-void sdl2_fail(std::string_view message)
-{
+void sdl2_fail(std::string_view message) {
     throw std::runtime_error(to_string(message) + SDL_GetError());
 }
 
-void glew_fail(std::string_view message, GLenum error)
-{
+void glew_fail(std::string_view message, GLenum error) {
     throw std::runtime_error(to_string(message) + reinterpret_cast<const char *>(glewGetErrorString(error)));
 }
 
 const char vertex_shader_source[] =
-R"(#version 330 core
+        R"(#version 330 core
 
 uniform mat4 model;
 uniform mat4 view;
@@ -70,12 +70,14 @@ void main()
 )";
 
 const char fragment_shader_source[] =
-R"(#version 330 core
+        R"(#version 330 core
 
 uniform vec3 light_direction;
 uniform vec3 camera_position;
 
 uniform sampler2D albedo_texture;
+uniform sampler2D normal_texture;
+uniform sampler2D environment_texture;
 
 in vec3 position;
 in vec3 tangent;
@@ -89,24 +91,83 @@ const float PI = 3.141592653589793;
 void main()
 {
     float ambient_light = 0.2;
+    vec3 bitangent = cross(tangent, normal);
+    mat3 tbn = mat3(tangent, bitangent, normal);
+    vec3 real_normal = tbn * ( texture(normal_texture, texcoord).rgb * 2.0 - vec3(1.0)) ;
+    real_normal = normalize(mix(normal, real_normal, 0.5));
 
-    float lightness = ambient_light + max(0.0, dot(normalize(normal), light_direction));
+    // направление на камеру
+    vec3 to_camera = position - camera_position;
+
+    // вычисляем, куда луч отражается
+    vec3 dir = normalize(reflect(to_camera, real_normal));
+
+    float x = atan(dir.z, dir.x) / PI * 0.5 + 0.5;
+    float y = -atan(dir.y, length(dir.xz)) / PI + 0.5;
+
+    vec3 env_albedo = texture(environment_texture, vec2(x, y)).rgb;
+
+    float lightness = ambient_light + max(0.0, dot(normalize(real_normal), light_direction));
 
     vec3 albedo = texture(albedo_texture, texcoord).rgb;
+    vec3 color = (lightness * albedo + env_albedo) / 2;
 
-    out_color = vec4(lightness * albedo, 1.0);
+    //color = env_albedo;
+    out_color = vec4(color, 1.0);
 }
 )";
 
-GLuint create_shader(GLenum type, const char * source)
-{
+const std::string env_vertex_shader_source =
+        R"(
+    #version 330 core
+
+    vec2 vertices[6] = vec2[6](
+        vec2(-1.0, -1.0),
+        vec2( 1.0, -1.0),
+        vec2( 1.0,  1.0),
+        vec2(-1.0, -1.0),
+        vec2( 1.0,  1.0),
+        vec2(-1.0,  1.0)
+    );
+
+    uniform mat4 view_projection_inverse;
+
+    out vec3 position;
+    void main() {
+        vec2 vertex = vertices[gl_VertexID];
+        vec4 ndc = vec4(vertex, 0.0, 1.0);
+        vec4 clip_space = view_projection_inverse * ndc;
+        position = clip_space.xyz / clip_space.w;
+        gl_Position = vec4(vertex, 0.0, 1.0);
+    }
+        )";
+
+const std::string env_fragment_shader_source =
+        R"(
+    #version 330 core
+    in vec3 position;
+    uniform sampler2D env;
+    uniform vec3 camera_position;
+
+    layout (location = 0) out vec4 out_color;
+    const float PI = 3.141592653589793;
+
+    void main() {
+        vec3 dir = normalize(position - camera_position);
+        float x = atan(dir.z, dir.x) / PI * 0.5 + 0.5;
+        float y = -atan(dir.y, length(dir.xz)) / PI + 0.5;
+        vec3 albedo = texture(env, vec2(x,y)).rgb;
+        out_color = vec4(albedo, 1.0);
+    }
+        )";
+
+GLuint create_shader(GLenum type, const char *source) {
     GLuint result = glCreateShader(type);
     glShaderSource(result, 1, &source, nullptr);
     glCompileShader(result);
     GLint status;
     glGetShaderiv(result, GL_COMPILE_STATUS, &status);
-    if (status != GL_TRUE)
-    {
+    if (status != GL_TRUE) {
         GLint info_log_length;
         glGetShaderiv(result, GL_INFO_LOG_LENGTH, &info_log_length);
         std::string info_log(info_log_length, '\0');
@@ -116,8 +177,7 @@ GLuint create_shader(GLenum type, const char * source)
     return result;
 }
 
-GLuint create_program(GLuint vertex_shader, GLuint fragment_shader)
-{
+GLuint create_program(GLuint vertex_shader, GLuint fragment_shader) {
     GLuint result = glCreateProgram();
     glAttachShader(result, vertex_shader);
     glAttachShader(result, fragment_shader);
@@ -125,8 +185,7 @@ GLuint create_program(GLuint vertex_shader, GLuint fragment_shader)
 
     GLint status;
     glGetProgramiv(result, GL_LINK_STATUS, &status);
-    if (status != GL_TRUE)
-    {
+    if (status != GL_TRUE) {
         GLint info_log_length;
         glGetProgramiv(result, GL_INFO_LOG_LENGTH, &info_log_length);
         std::string info_log(info_log_length, '\0');
@@ -137,26 +196,22 @@ GLuint create_program(GLuint vertex_shader, GLuint fragment_shader)
     return result;
 }
 
-struct vertex
-{
+struct vertex {
     glm::vec3 position;
     glm::vec3 tangent;
     glm::vec3 normal;
     glm::vec2 texcoords;
 };
 
-std::pair<std::vector<vertex>, std::vector<std::uint32_t>> generate_sphere(float radius, int quality)
-{
+std::pair<std::vector<vertex>, std::vector<std::uint32_t>> generate_sphere(float radius, int quality) {
     std::vector<vertex> vertices;
 
-    for (int latitude = -quality; latitude <= quality; ++latitude)
-    {
-        for (int longitude = 0; longitude <= 4 * quality; ++longitude)
-        {
+    for (int latitude = -quality; latitude <= quality; ++latitude) {
+        for (int longitude = 0; longitude <= 4 * quality; ++longitude) {
             float lat = (latitude * glm::pi<float>()) / (2.f * quality);
             float lon = (longitude * glm::pi<float>()) / (2.f * quality);
 
-            auto & vertex = vertices.emplace_back();
+            auto &vertex = vertices.emplace_back();
             vertex.normal = {std::cos(lat) * std::cos(lon), std::sin(lat), std::cos(lat) * std::sin(lon)};
             vertex.position = vertex.normal * radius;
             vertex.tangent = {-std::cos(lat) * std::sin(lon), 0.f, std::cos(lat) * std::cos(lon)};
@@ -167,10 +222,8 @@ std::pair<std::vector<vertex>, std::vector<std::uint32_t>> generate_sphere(float
 
     std::vector<std::uint32_t> indices;
 
-    for (int latitude = 0; latitude < 2 * quality; ++latitude)
-    {
-        for (int longitude = 0; longitude < 4 * quality; ++longitude)
-        {
+    for (int latitude = 0; latitude < 2 * quality; ++latitude) {
+        for (int longitude = 0; longitude < 4 * quality; ++longitude) {
             std::uint32_t i0 = (latitude + 0) * (4 * quality + 1) + (longitude + 0);
             std::uint32_t i1 = (latitude + 1) * (4 * quality + 1) + (longitude + 0);
             std::uint32_t i2 = (latitude + 0) * (4 * quality + 1) + (longitude + 1);
@@ -183,8 +236,7 @@ std::pair<std::vector<vertex>, std::vector<std::uint32_t>> generate_sphere(float
     return {std::move(vertices), std::move(indices)};
 }
 
-GLuint load_texture(std::string const & path)
-{
+GLuint load_texture(std::string const &path) {
     int width, height, channels;
     auto pixels = stbi_load(path.data(), &width, &height, &channels, 4);
 
@@ -201,8 +253,7 @@ GLuint load_texture(std::string const & path)
     return result;
 }
 
-int main() try
-{
+int main() try {
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
         sdl2_fail("SDL_Init: ");
 
@@ -217,11 +268,11 @@ int main() try
     SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
-    SDL_Window * window = SDL_CreateWindow("Graphics course practice 5",
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
-        800, 600,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
+    SDL_Window *window = SDL_CreateWindow("Graphics course practice 5",
+                                          SDL_WINDOWPOS_CENTERED,
+                                          SDL_WINDOWPOS_CENTERED,
+                                          800, 600,
+                                          SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
 
     if (!window)
         sdl2_fail("SDL_CreateWindow: ");
@@ -251,6 +302,11 @@ int main() try
     GLuint light_direction_location = glGetUniformLocation(program, "light_direction");
     GLuint camera_position_location = glGetUniformLocation(program, "camera_position");
     GLuint albedo_texture_location = glGetUniformLocation(program, "albedo_texture");
+    GLuint normal_texture_location = glGetUniformLocation(program, "normal_texture");
+    GLuint environment_texture_location = glGetUniformLocation(program, "environment_texture");
+
+    GLuint env_vao;
+    glGenVertexArrays(1, &env_vao);
 
     GLuint sphere_vao, sphere_vbo, sphere_ebo;
     glGenVertexArrays(1, &sphere_vao);
@@ -270,16 +326,27 @@ int main() try
         sphere_index_count = indices.size();
     }
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *)offsetof(vertex, position));
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *) offsetof(vertex, position));
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *)offsetof(vertex, tangent));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *) offsetof(vertex, tangent));
     glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *)offsetof(vertex, normal));
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *) offsetof(vertex, normal));
     glEnableVertexAttribArray(3);
-    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *)offsetof(vertex, texcoords));
+    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *) offsetof(vertex, texcoords));
+
+    // env_map program
+    auto env_vertex_shader = create_shader(GL_VERTEX_SHADER, env_vertex_shader_source.data());
+    auto env_fragment_shader = create_shader(GL_FRAGMENT_SHADER, env_fragment_shader_source.data());
+    auto env_program = create_program(env_vertex_shader, env_fragment_shader);
+
+    auto env_view_projection_inverse_location = glGetUniformLocation(env_program, "view_projection_inverse");
+    auto env_env_location = glGetUniformLocation(env_program, "env");
+    auto env_camera_position_location = glGetUniformLocation(env_program, "camera_position");
 
     std::string project_root = PROJECT_ROOT;
     GLuint albedo_texture = load_texture(project_root + "/textures/brick_albedo.jpg");
+    GLuint normal_texture = load_texture(project_root + "/textures/brick_normal.jpg");
+    GLuint environment_texture = load_texture(project_root + "/textures/environment_map.jpg");
 
     auto last_frame_start = std::chrono::high_resolution_clock::now();
 
@@ -292,29 +359,28 @@ int main() try
     float camera_distance = 2.f;
 
     bool running = true;
-    while (running)
-    {
-        for (SDL_Event event; SDL_PollEvent(&event);) switch (event.type)
-        {
-        case SDL_QUIT:
-            running = false;
-            break;
-        case SDL_WINDOWEVENT: switch (event.window.event)
-            {
-            case SDL_WINDOWEVENT_RESIZED:
-                width = event.window.data1;
-                height = event.window.data2;
-                glViewport(0, 0, width, height);
-                break;
+    while (running) {
+        for (SDL_Event event; SDL_PollEvent(&event);)
+            switch (event.type) {
+                case SDL_QUIT:
+                    running = false;
+                    break;
+                case SDL_WINDOWEVENT:
+                    switch (event.window.event) {
+                        case SDL_WINDOWEVENT_RESIZED:
+                            width = event.window.data1;
+                            height = event.window.data2;
+                            glViewport(0, 0, width, height);
+                            break;
+                    }
+                    break;
+                case SDL_KEYDOWN:
+                    button_down[event.key.keysym.sym] = true;
+                    break;
+                case SDL_KEYUP:
+                    button_down[event.key.keysym.sym] = false;
+                    break;
             }
-            break;
-        case SDL_KEYDOWN:
-            button_down[event.key.keysym.sym] = true;
-            break;
-        case SDL_KEYUP:
-            button_down[event.key.keysym.sym] = false;
-            break;
-        }
 
         if (!running)
             break;
@@ -358,6 +424,26 @@ int main() try
 
         glm::vec3 camera_position = (glm::inverse(view) * glm::vec4(0.f, 0.f, 0.f, 1.f)).xyz();
 
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, albedo_texture);
+        glActiveTexture(GL_TEXTURE0 + 1);
+        glBindTexture(GL_TEXTURE_2D, normal_texture);
+        glActiveTexture(GL_TEXTURE0 + 2);
+        glBindTexture(GL_TEXTURE_2D, environment_texture);
+
+        // *** Рисуем env
+        glDisable(GL_DEPTH_TEST);
+        glUseProgram(env_program);
+        auto view_projection_inverse = glm::inverse(projection * view);
+        glUniformMatrix4fv(env_view_projection_inverse_location, 1, GL_FALSE,
+                           reinterpret_cast<float *>(&view_projection_inverse));
+        glUniform1i(env_env_location, 2);
+        glUniform3fv(env_camera_position_location, 1, reinterpret_cast<float *>(&camera_position));
+        glBindVertexArray(env_vao);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+
+        // *** Рисуем ball
+        glEnable(GL_DEPTH_TEST);
         glUseProgram(program);
         glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
         glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
@@ -365,9 +451,8 @@ int main() try
         glUniform3fv(light_direction_location, 1, reinterpret_cast<float *>(&light_direction));
         glUniform3fv(camera_position_location, 1, reinterpret_cast<float *>(&camera_position));
         glUniform1i(albedo_texture_location, 0);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, albedo_texture);
+        glUniform1i(normal_texture_location, 1);
+        glUniform1i(environment_texture_location, 2);
 
         glBindVertexArray(sphere_vao);
         glDrawElements(GL_TRIANGLES, sphere_index_count, GL_UNSIGNED_INT, nullptr);
@@ -378,8 +463,7 @@ int main() try
     SDL_GL_DeleteContext(gl_context);
     SDL_DestroyWindow(window);
 }
-catch (std::exception const & e)
-{
+catch (std::exception const &e) {
     std::cerr << e.what() << std::endl;
     return EXIT_FAILURE;
 }
