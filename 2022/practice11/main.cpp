@@ -411,8 +411,26 @@ int main() try {
     glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
     glUniform3fv(camera_position_location, 1, reinterpret_cast<float *>(&camera_position));
 
-    glBindVertexArray(vao);
-    glDrawArrays(GL_POINTS, 0, particles.size());
+        glm::mat4 model(1.f);
+
+        glm::mat4 view(1.f);
+        view = glm::translate(view, {0.f, -camera_height, -camera_distance});
+        view = glm::rotate(view, view_angle, {1.f, 0.f, 0.f});
+        view = glm::rotate(view, camera_rotation, {0.f, 1.f, 0.f});
+
+        glm::mat4 projection = glm::perspective(glm::pi<float>() / 2.f, (1.f * width) / height, near, far);
+
+        glm::vec3 camera_position = (glm::inverse(view) * glm::vec4(0.f, 0.f, 0.f, 1.f)).xyz();
+
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, particles.size() * sizeof(particle), particles.data(), GL_STATIC_DRAW);
+
+        glUseProgram(program);
+
+        glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+        glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
+        glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
+        glUniform3fv(camera_position_location, 1, reinterpret_cast<float *>(&camera_position));
 
     SDL_GL_SwapWindow(window);
   }
