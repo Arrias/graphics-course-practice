@@ -124,7 +124,7 @@ void main()
     const int ITER = 64;
     const int JTER = 8;
 
-    float optical_depth = 0.0;
+    vec3 optical_depth = vec3(0.0);
     float absorption = 3.0;
     float dt = (tmax - tmin) / ITER;
 
@@ -138,7 +138,7 @@ void main()
         float t = tmin + (i + 0.5) * dt;
         vec3 p = camera_position + t * from_camera;
         float density = texture(sampler, get_texture_pos(p)).r;
-        optical_depth += absorption * density * dt;
+        optical_depth += extinction * density * dt;
 
         vec3 light_optical_depth = vec3(0.0);
         vec2 light_seg = intersect_bbox(p, light_direction);
@@ -155,7 +155,7 @@ void main()
         color += light_color * exp(-light_optical_depth) * exp(-optical_depth) * dt * texture(sampler, get_texture_pos(p)).r * scattering / 4.0 / PI;
     }
 
-    float opacity = 1.0 - exp(-optical_depth);
+    vec3 opacity = 1.0 - exp(-optical_depth);
     out_color = vec4(color * opacity,  1.0);
 }
 )";
@@ -240,8 +240,8 @@ GLuint load_texture(const std::string &path) {
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_3D, texture);
 
-  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
   glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
