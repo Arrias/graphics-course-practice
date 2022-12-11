@@ -124,4 +124,17 @@ void Shader::Set(const std::string &name, int value) {
     Set1i(name, value);
 }
 
+void Shader::SetVec4(const std::string &name, const glm::vec4 &v) {
+    glUniform4fv(GetLocation(name), 1,
+                 reinterpret_cast<const GLfloat *>(&v));
+}
+
+void Shader::Set(const std::string &name, const glm::vec4 &v) {
+    SetVec4(name, v);
+}
+
+void Shader::Set(const std::string &name, int cnt, const glm::mat4x3 *m) {
+    glUniformMatrix4x3fv(GetLocation(name), cnt, GL_FALSE, reinterpret_cast<const GLfloat *>(m));
+}
+
 }

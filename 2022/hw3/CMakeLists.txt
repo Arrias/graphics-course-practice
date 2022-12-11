@@ -24,6 +24,8 @@ set(TARGET_NAME "${PROJECT_NAME}")
 
 set(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 
+include_directories(rapidjson)
+
 add_executable(${TARGET_NAME} main.cpp
         stb_image.h stb_image.c utils/utils.cpp utils/utils.h
         rapiragl/utils/strong_typedef.h rapiragl/components/file_reader/file_reader.cpp
@@ -31,8 +33,11 @@ add_executable(${TARGET_NAME} main.cpp
         rapiragl/components/shader/shader.h rapiragl/common/types.h rapiragl/rapiragl.h
         rapiragl/components/texture_loader/texture_loader.cpp rapiragl/components/texture_loader/texture_loader.h
         rapiragl/components/array_scene_loader/array_scene_loader.cpp
-        rapiragl/components/array_scene_loader/array_scene_loader.h obj_parser.cpp obj_parser.h)
+        rapiragl/components/array_scene_loader/array_scene_loader.h obj_parser.cpp obj_parser.h
+        gltf_loader.cpp gltf_loader.hpp
+        )
 target_include_directories(${TARGET_NAME} PUBLIC
+        "${CMAKE_CURRENT_LIST_DIR}/rapidjson/include"
         "${SDL2_INCLUDE_DIRS}"
         "${GLEW_INCLUDE_DIRS}"
         "${OPENGL_INCLUDE_DIRS}"

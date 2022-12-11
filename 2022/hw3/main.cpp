@@ -16,6 +16,7 @@
 #include "stb_image.h"
 #include "utils/utils.h"
 #include "obj_parser.h"
+#include "gltf_loader.hpp"
 
 #include <rapiragl/rapiragl.h>
 #include <chrono>
@@ -230,6 +231,65 @@ int main() try {
     GLuint debug_vao;
     glGenVertexArrays(1, &debug_vao);
 
+    auto const wolf_model = load_gltf(root + "/wolf/Wolf-Blender-2.82a.gltf");
+    GLuint wolf_vbo;
+    glGenBuffers(1, &wolf_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, wolf_vbo);
+    glBufferData(GL_ARRAY_BUFFER, wolf_model.buffer.size(), wolf_model.buffer.data(), GL_STATIC_DRAW);
+
+    struct mesh {
+        GLuint vao;
+        gltf_model::accessor indices;
+        gltf_model::material material;
+    };
+
+    auto setup_attribute = [](int index, gltf_model::accessor const &accessor, bool integer = false) {
+        glEnableVertexAttribArray(index);
+        if (integer)
+            glVertexAttribIPointer(index, accessor.size, accessor.type, 0,
+                                   reinterpret_cast<void *>(accessor.view.offset));
+        else
+            glVertexAttribPointer(index,
+                                  accessor.size,
+                                  accessor.type,
+                                  GL_FALSE,
+                                  0,
+                                  reinterpret_cast<void *>(accessor.view.offset));
+    };
+
+    std::vector<mesh> meshes;
+    for (auto const &mesh: wolf_model.meshes) {
+        auto &result = meshes.emplace_back();
+        glGenVertexArrays(1, &result.vao);
+        glBindVertexArray(result.vao);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, wolf_vbo);
+        result.indices = mesh.indices;
+
+        setup_attribute(0, mesh.position);
+        setup_attribute(1, mesh.normal);
+        setup_attribute(2, mesh.texcoord);
+        setup_attribute(3, mesh.joints, true);
+        setup_attribute(4, mesh.weights);
+
+        result.material = mesh.material;
+    }
+
+    for (const auto &mesh: meshes) {
+        if (!mesh.material.texture_path) continue;
+
+        auto path = FilePath{root + "/wolf/" + *mesh.material.texture_path};
+        TextureLoader_.GetTexture(
+                path, []() {
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+                });
+    }
+
+    const auto &run_animation = wolf_model.animations.at("01_Run");
+
+    /// ************************************************************************************ END OF PREDGEN
+
     auto last_frame_start = std::chrono::high_resolution_clock::now();
 
     float time = 0.f;
@@ -239,8 +299,9 @@ int main() try {
     float view_elevation = glm::radians(30.f);
     float view_azimuth = 0.f;
     float camera_distance = 2.f;
-    float ambient_light = 0.f;
+    float ambient_light = 0.2f;
     float env_lightness = 1.f;
+    float wolf_len = 0.2f;
 
     bool running = true;
     bool paused = false;
@@ -261,6 +322,7 @@ int main() try {
         glEnable(GL_DEPTH_TEST);
 
         main_shader.Use();
+        main_shader.Set("is_wolf", (int) 0);
         main_shader.Set("far_plane", far);
         main_shader.Set("model", cow_model);
         main_shader.Set("view", view);
@@ -282,6 +344,77 @@ int main() try {
         main_shader.Set("model", glm::mat4(1.f));
         glBindVertexArray(floor_vao);
         glDrawArrays(GL_TRIANGLE_FAN, 0, floor.size());
+
+        // WOLF
+        main_shader.Set("is_wolf", (int) 1);
+        auto wolf_model_mat = glm::translate(glm::rotate(glm::mat4(1.f), time, {0.f, 0.f, 1.f}),
+                                             {sin(time), 0.f, cos(time)});
+
+        wolf_model_mat = glm::scale(glm::mat4(1.f), {0.7, 0.7, 0.7});
+        wolf_model_mat = glm::translate(wolf_model_mat, {0.f, 0.f, wolf_len / 2.f});
+        wolf_model_mat = glm::rotate(wolf_model_mat, time, {0.f, 1.f, 0.f});
+        wolf_model_mat = glm::translate(glm::mat4(1.f), {-cos(time) * 0.7, 0.f, sin(time) * 0.7}) * wolf_model_mat;
+
+        main_shader.Set("model", wolf_model_mat);
+
+        std::vector<glm::mat4x3> bones(wolf_model.bones.size());
+
+        // TASK 3
+        float frame_run = std::fmod(time, run_animation.max_time);
+
+        for (int i = 0; i < wolf_model.bones.size(); ++i) {
+            auto cur_translation = glm::translate(glm::mat4(1.f), run_animation.bones[i].translation(frame_run));
+            auto cur_scale = glm::scale(glm::mat4(1.f), run_animation.bones[i].scale(frame_run));
+            auto cur_rotation = glm::toMat4(run_animation.bones[i].rotation(frame_run));
+            auto cur_transform = cur_translation * cur_rotation * cur_scale;
+            if (wolf_model.bones[i].parent != -1) {
+                cur_transform = bones[wolf_model.bones[i].parent] * cur_transform;
+            }
+            bones[i] = cur_transform;
+        }
+        for (int i = 0; i < wolf_model.bones.size(); ++i) {
+            bones[i] = bones[i] * wolf_model.bones[i].inverse_bind_matrix;
+        }
+
+        main_shader.Set("bones", bones.size(), bones.data());
+
+        auto draw_meshes = [&](bool transparent) {
+            for (auto const &mesh: meshes) {
+                if (mesh.material.transparent != transparent)
+                    continue;
+
+                if (mesh.material.two_sided)
+                    glDisable(GL_CULL_FACE);
+                else
+                    glEnable(GL_CULL_FACE);
+
+                if (transparent)
+                    glEnable(GL_BLEND);
+                else
+                    glDisable(GL_BLEND);
+
+                if (mesh.material.texture_path) {
+                    auto path = FilePath{root + "/wolf/" + *mesh.material.texture_path};
+                    main_shader.Set("albedo", (int) TextureLoader_.GetTexture(path).texture_unit);
+                    main_shader.Set("use_texture", (int) 1);
+                } else if (mesh.material.color) {
+                    main_shader.Set("use_texture", (int) 0);
+                    main_shader.Set("color", *mesh.material.color);
+                } else
+                    continue;
+
+                glBindVertexArray(mesh.vao);
+                glDrawElements(GL_TRIANGLES,
+                               mesh.indices.count,
+                               mesh.indices.type,
+                               reinterpret_cast<void *>(mesh.indices.view.offset));
+            }
+        };
+
+        draw_meshes(false);
+        glDepthMask(GL_FALSE);
+        draw_meshes(true);
+        glDepthMask(GL_TRUE);
 
         // *** Рисуем ball
         {   // *** включаем блендинг
@@ -362,6 +495,13 @@ int main() try {
         if (button_down[SDLK_i])
             env_lightness -= 0.001f;
 
+//        if (button_down[SDLK_b])
+//            wolf_len += 0.1f;
+//        if (button_down[SDLK_n])
+//            wolf_len -= 0.1f;
+//
+//        std::cout << wolf_len << std::endl;
+
         float near = 0.1f;
         float far = 100.f;
         float top = near;
@@ -374,13 +514,15 @@ int main() try {
         view = glm::rotate(view, view_azimuth, {0.f, 1.f, 0.f});
         glm::mat4 projection = glm::mat4(1.f);
         projection = glm::perspective(glm::pi<float>() / 2.f, (1.f * width) / height, near, far);
-        glm::vec3 light_direction = glm::normalize(glm::vec3(std::sin(time * 0.5f) * 3, 2.f, std::cos(time * 0.5f) * 3 ));
+        glm::vec3 light_direction = glm::normalize(
+                glm::vec3(std::sin(time * 0.5f) * 3, 2.f, std::cos(time * 0.5f) * 3));
         glm::vec3 camera_position = (glm::inverse(view) * glm::vec4(0.f, 0.f, 0.f, 1.f)).xyz();
 
         /// *** в начале нарисуем все в shadow_map
 
         glm::mat4x4 transform; // ай-ай-ай, как плохо...
         {
+            // тут рисуются тени
             glBindFramebuffer(GL_FRAMEBUFFER, shadow_fbo);
             glViewport(0, 0, shadow_map_resolution, shadow_map_resolution);
 
@@ -395,7 +537,6 @@ int main() try {
             transform = GetSunShadowTransform(bbox.vertices, bbox.C, light_direction);
             shadow_shader.Use();
             shadow_shader.Set("transform", transform);
-
             shadow_shader.Set("model", cow_model);
             glBindVertexArray(cow_vao);
             glDrawElements(GL_TRIANGLES, cow.indices.size(), GL_UNSIGNED_INT, (void *) nullptr);
@@ -425,10 +566,10 @@ int main() try {
         env_shader.Set("lightness", env_lightness);
         glBindVertexArray(env_vao);
         glDrawArrays(GL_TRIANGLES, 0, 6);
-//
-//        /// *** Рисуем сцену
+
+        /// *** Рисуем сцену
         draw_scene(far, model, view, projection, transform, light_direction, camera_position);
-//
+
         /// *** Рисуем дебажный прямоугольник
         debug_shader.Use();
         debug_shader.Set("sampler", sun_texture_unit);

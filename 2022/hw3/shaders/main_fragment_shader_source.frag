@@ -17,19 +17,10 @@ uniform samplerCube depthMap;
 uniform float far_plane;
 uniform float ambient_light;
 
-float ShadowCalculation() {
-    vec3 fragToLight = position - point_light_position;
-    //return texture(depthMap, fragToLight).r;;
-    float closestDepth = texture(depthMap, fragToLight).r;
-    closestDepth *= far_plane;
-    float currentDepth = length(fragToLight);
-    //        //if (currentDepth < 100.f) {
-    //          //  return 0.0;
-    //        //}
-    float bias = 1.5;
-    float shadow = currentDepth - bias > closestDepth ? 0.0 : 1.0;
-    return shadow;
-}
+uniform int is_wolf;
+uniform int use_texture;
+uniform vec4 color;
+uniform sampler2D albedo;
 
 uniform sampler2D sampler;
 uniform sampler2D shadow_map;
@@ -80,9 +71,21 @@ void main() {
     if (in_shadow_texture)
     shadow_factor = factor;
 
-    vec3 albedo = texture(sampler, texcoord).xyz;
-vec3 ambient = albedo * ambient_light;
-vec3 color = ambient;
-color += diffuse(sun_direction, albedo) * sun_color * shadow_factor;
-out_color = vec4(color, 1.0);
+    if (is_wolf == 0) {
+        vec3 albedo = texture(sampler, texcoord).xyz;
+        vec3 ambient = albedo * ambient_light;
+        vec3 my_color = ambient;
+        my_color += diffuse(sun_direction, albedo) * sun_color * shadow_factor;
+        out_color = vec4(my_color, 1.0);
+    } else {
+        float ambient_bias = 0.2;
+        float real_ambient = ambient_light + ambient_bias;
+        vec4 albedo_color;
+        if (use_texture == 1)
+        albedo_color = texture(albedo, texcoord);
+        else
+        albedo_color = color;
+        float diffuse = max(0.0, dot(normalize(normal), sun_direction));
+        out_color = vec4(albedo_color.rgb * (real_ambient + diffuse), 1.0);
+    }
 }

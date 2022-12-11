@@ -38,11 +38,17 @@ public:
 
     void Set(const std::string &name, int value);
 
+    void Set(const std::string &name, const glm::vec4 &v);
+
+    void Set(const std::string &name, int cnt, const glm::mat4x3 *m);
+
     void Set1f(const std::string &name, float value);
 
     void SetMat4x4(const std::string &name, const glm::mat4x4 &m);
 
     void SetVec3(const std::string &name, const glm::vec3 &v);
+
+    void SetVec4(const std::string &name, const glm::vec4 &v);
 
     void Set1i(const std::string &name, int value);
 
