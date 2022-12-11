@@ -185,11 +185,6 @@ int main() try {
             .geometry = std::nullopt
     });
 
-    GLuint fog_vao, fog_vbo, fog_ebo;
-    int cube_size;
-    std::tie(fog_vao, fog_vbo, fog_ebo, cube_size) = GenFogBuffers();
-    auto fog_texture = Load3dTexture(root + "/cloud.data");
-
     /////////////////////////////
     GLuint debug_vao;
     glGenVertexArrays(1, &debug_vao);
@@ -272,6 +267,7 @@ int main() try {
         return wolf_model_mat;
     };
 
+
     const glm::vec3 cloud_bbox_min{-2.f, -1.f, -1.f};
     const glm::vec3 cloud_bbox_max{2.f, 1.f, 1.f};
 
@@ -292,7 +288,7 @@ int main() try {
         main_shader.Use();
         main_shader.Set("is_wolf", (int) 0);
         main_shader.Set("far_plane", far);
-        main_shader.Set("model", cow_model);
+        main_shader.Set("model", State.GetSplashModel() * cow_model);
         main_shader.Set("view", view);
         main_shader.Set("projection", projection);
         main_shader.Set("sun_color", {.7f, .7f, .7f});
@@ -309,13 +305,13 @@ int main() try {
 
         // *** Рисуем пол
         main_shader.Set("sampler", (int) snow_texture.texture_unit);
-        main_shader.Set("model", glm::mat4(1.f));
+        main_shader.Set("model", State.GetSplashModel() * glm::mat4(1.f));
         glBindVertexArray(floor_vao);
         glDrawArrays(GL_TRIANGLE_FAN, 0, floor.size());
 
         // WOLF
         main_shader.Set("is_wolf", (int) 1);
-        main_shader.Set("model", get_wolf_model_mat(State.time));
+        main_shader.Set("model", State.GetSplashModel() * get_wolf_model_mat(State.time));
         main_shader.Set("bones", bones.size(), bones.data());
 
         auto draw_meshes = [&](bool transparent) {
@@ -366,7 +362,7 @@ int main() try {
                      GL_STATIC_DRAW);
         snowflake_shader.Use();
         snowflake_shader.Set("col", 1);
-        snowflake_shader.Set("model", glm::mat4(1.f));
+        snowflake_shader.Set("model", State.GetSplashModel());
         snowflake_shader.Set("view", view);
         snowflake_shader.Set("projection", projection);
         snowflake_shader.Set("camera_position", camera_position);
@@ -389,20 +385,23 @@ int main() try {
         fog_shader.Set("bbox_max", cloud_bbox_max);
         fog_shader.Set("camera_position", camera_position);
         fog_shader.Set("light_direction", light_direction);
-        fog_shader.Set("model", glm::mat4(1.f));
+        fog_shader.Set("model", State.GetSplashModel() * glm::mat4(1.f));
         fog_shader.Set("shadow_map", sun_texture_unit);
         fog_shader.Set("transform", shadow_transform);
+        fog_shader.Set("sphere_y_mid", State.getYhalfSphere());
 
         glBindVertexArray(sphere_vao);
         glDrawElements(GL_TRIANGLES, sphere_index_count, GL_UNSIGNED_INT, nullptr);
 
         // *** Рисуем ball
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
         glEnable(GL_BLEND);
         glBlendEquation(GL_FUNC_ADD);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glEnable(GL_DEPTH_TEST);
         sphere_shader.Use();
-        sphere_shader.Set("model", model);
+        sphere_shader.Set("model", State.GetSplashModel() * model);
         sphere_shader.Set("view", view);
         sphere_shader.Set("projection", projection);
         sphere_shader.Set("light_direction", light_direction);
@@ -410,6 +409,7 @@ int main() try {
         sphere_shader.Set("albedo_texture", (int) snow_texture.texture_unit);
         sphere_shader.Set("normal_texture", (int) normal_texture.texture_unit);
         sphere_shader.Set("environment_texture", (int) environment_texture.texture_unit);
+        sphere_shader.Set("sphere_y_mid", State.getYhalfSphere());
         glBindVertexArray(sphere_vao);
         glDrawElements(GL_TRIANGLES, sphere_index_count, GL_UNSIGNED_INT, nullptr);
 
@@ -471,17 +471,17 @@ int main() try {
             shadow_shader.Use();
             shadow_shader.Set("is_wolf", 0);
             shadow_shader.Set("transform", transform);
-            shadow_shader.Set("model", cow_model);
+            shadow_shader.Set("model", State.GetSplashModel() * cow_model);
             glBindVertexArray(cow_vao);
             glDrawElements(GL_TRIANGLES, cow.indices.size(), GL_UNSIGNED_INT, (void *) nullptr);
 
-            shadow_shader.Set("model", model);
+            shadow_shader.Set("model", State.GetSplashModel() * model);
             glBindVertexArray(floor_vao);
             glDrawArrays(GL_TRIANGLE_FAN, 0, floor.size());
 
             shadow_shader.Set("is_wolf", 1);
             shadow_shader.Set("bones", bones.size(), bones.data());
-            shadow_shader.Set("model", get_wolf_model_mat(State.time));
+            shadow_shader.Set("model", State.GetSplashModel() * get_wolf_model_mat(State.time));
 
             for (auto const &mesh: meshes) {
                 glBindVertexArray(mesh.vao);

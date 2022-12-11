@@ -5,6 +5,8 @@ uniform vec3 light_direction;
 uniform vec3 bbox_min;
 uniform vec3 bbox_max;
 uniform sampler3D sampler;
+uniform float sphere_y_mid;
+
 in vec3 position;
 
 uniform sampler2D shadow_map;
@@ -42,9 +44,11 @@ vec2 solve(float a, float b, float c) {
 
 vec2 intersect_bbox(vec3 origin, vec3 direction)
 {
+    vec3 origin_ = origin;
+    origin_.y -= sphere_y_mid;
     float A = pow(direction.x, 2) + pow(direction.y, 2) + pow(direction.z, 2);
-    float B = 2 * dot(origin, direction);
-    float C = pow(origin.x, 2) + pow(origin.y, 2) + pow(origin.z, 2) - 1;
+    float B = 2 * dot(origin_, direction);
+    float C = pow(origin_.x, 2) + pow(origin_.y, 2) + pow(origin_.z, 2) - 1;
     return solve(A, B, C);
 }
 

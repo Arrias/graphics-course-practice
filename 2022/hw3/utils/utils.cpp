@@ -8,6 +8,7 @@
 #include "utils.h"
 #include "stb_image.h"
 #include "glm/ext/scalar_constants.hpp"
+#include "glm/ext/matrix_transform.hpp"
 
 namespace {
 
@@ -18,6 +19,7 @@ float get_rnd(float l, float r) {
 };
 
 const float eps = 0.01;
+const int MAX_PARTICLES = 400;
 
 }
 
@@ -207,6 +209,8 @@ bool PState::tick() {
                 button_down[event.key.keysym.sym] = true;
                 if (event.key.keysym.sym == SDLK_SPACE)
                     paused = !paused;
+                if (event.key.keysym.sym == SDLK_m)
+                    startAnimation();
                 break;
             case SDL_KEYUP:
                 button_down[event.key.keysym.sym] = false;
@@ -246,11 +250,14 @@ bool PState::tick() {
     return true;
 }
 
-PState::PState(int width, int height) : width(width), height(height) {}
+PState::PState(int width, int height) : width(width), height(height) {
+}
 
 void PState::update_particles(float dt) {
     if (paused) return;
-    if (particles.size() < 400) {
+
+    if (particles.size() < MAX_PARTICLES && potential) {
+        --potential;
         particles.push_back(new_particle());
     }
 
@@ -258,6 +265,8 @@ void PState::update_particles(float dt) {
     float C = 2;
     float D = 0.2;
     float maxY = 0.3f;
+    std::vector<particle> new_particles;
+
     for (auto &p: particles) {
         p.speed.y -= dt * A;
         p.position += p.speed * dt;
@@ -266,9 +275,16 @@ void PState::update_particles(float dt) {
         p.angle += p.angular_speed * dt;
 
         if (p.position.y < eps) {
-            p = new_particle();
+            if (potential > 0) {
+                --potential;
+                new_particles.push_back(new_particle());
+            }
+        } else {
+            new_particles.push_back(p);
         }
     }
+
+    particles.swap(new_particles);
 }
 
 particle PState::new_particle() {
@@ -276,11 +292,41 @@ particle PState::new_particle() {
     p.position.x = get_rnd(-0.8f, 0.8f);
     p.position.z = get_rnd(-sqrt(1 - p.position.x * p.position.x), sqrt(1 - p.position.x * p.position.x));
     p.position.y = sqrt(1 - p.position.x * p.position.x - p.position.z * p.position.z) - eps;
-    p.size = get_rnd(0.01, 0.02);
+    p.size = get_rnd(0.02, 0.04);
     p.speed = glm::vec3(get_rnd(0.01, 0.02), -get_rnd(0.1, 0.2), get_rnd(0.01, 0.02));
     p.angle = 0;
     p.angular_speed = get_rnd(0.1, 0.9);
     return p;
+}
+
+glm::mat4 PState::GetSplashModel() {
+    return glm::translate(glm::mat4(1.f), {0.f, getYhalfSphere(), 0.f});
+}
+
+float PState::getYhalfSphere() {
+    if (splashState == SplashState::READY_TO_SPLASH) {
+        lastAnimationStartTime = time;
+        splashState = SplashState::SPLASH;
+    }
+    if (splashState != SplashState::SPLASH && splashState != SplashState::READY_TO_END_SPLASH) {
+        return 0.f;
+    }
+    float delt = time - lastAnimationStartTime;
+    if (delt > 3.f) {
+        splashState = SplashState::READY_TO_END_SPLASH;
+    }
+    float y = (1.f + sin(pow(5 - 0.146 + delt, 2))) / 3;
+    if (splashState == SplashState::READY_TO_END_SPLASH && y < eps) {
+        splashState = SplashState::WAIT;
+        potential += MAX_PARTICLES * 3;
+    }
+    return y;
+}
+
+void PState::startAnimation() {
+    if (splashState != SplashState::WAIT) return;
+    splashState = SplashState::READY_TO_SPLASH;
+    lastAnimationStartTime = time;
 }
 
 std::tuple<GLuint, GLuint, GLuint, int> GenSphereBuffers() {
@@ -331,85 +377,4 @@ std::tuple<GLuint, GLuint> GenSnowflakeBuffers() {
     glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(particle), (void *) 28);
 
     return {vao, vbo};
-}
-
-static glm::vec3 cube_vertices[]
-        {
-                {0.f, 0.f, 0.f},
-                {1.f, 0.f, 0.f},
-                {0.f, 1.f, 0.f},
-                {1.f, 1.f, 0.f},
-                {0.f, 0.f, 1.f},
-                {1.f, 0.f, 1.f},
-                {0.f, 1.f, 1.f},
-                {1.f, 1.f, 1.f},
-        };
-
-static std::uint32_t cube_indices[]
-        {
-                // -Z
-                0, 2, 1,
-                1, 2, 3,
-                // +Z
-                4, 5, 6,
-                6, 5, 7,
-                // -Y
-                0, 1, 4,
-                4, 1, 5,
-                // +Y
-                2, 6, 3,
-                3, 6, 7,
-                // -X
-                0, 4, 2,
-                2, 4, 6,
-                // +X
-                1, 3, 5,
-                5, 3, 7,
-        };
-
-
-std::tuple<GLuint, GLuint, GLuint, int> GenFogBuffers() {
-    GLuint vao, vbo, ebo;
-    glGenVertexArrays(1, &vao);
-    glBindVertexArray(vao);
-
-    glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(cube_vertices), cube_vertices, GL_STATIC_DRAW);
-
-    glGenBuffers(1, &ebo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(cube_indices), cube_indices, GL_STATIC_DRAW);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-
-    return {vao, vbo, ebo, std::size(cube_indices)};
-}
-
-GLuint Load3dTexture(const std::string &path) {
-    int width = 128;
-    int height = 64;
-    int depth = 64;
-
-    std::vector<char> pixels(width * height * depth);
-
-    GLuint texture;
-    glActiveTexture(GL_TEXTURE0);
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_3D, texture);
-
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-
-    std::ifstream input(path, std::ios::binary);
-    input.read(pixels.data(), pixels.size());
-
-    glTexImage3D(GL_TEXTURE_3D, 0, GL_R8, width, height, depth, 0, GL_RED, GL_UNSIGNED_BYTE, pixels.data());
-    glGenerateMipmap(GL_TEXTURE_3D);
-    return texture;
 }

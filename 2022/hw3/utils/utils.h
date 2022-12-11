@@ -64,6 +64,13 @@ struct particle {
     float angular_speed;
 };
 
+enum class SplashState {
+    WAIT,
+    READY_TO_SPLASH,
+    SPLASH,
+    READY_TO_END_SPLASH
+};
+
 struct PState {
     int width, height;
 
@@ -84,10 +91,23 @@ struct PState {
     std::map<SDL_Keycode, bool> button_down;
 
     std::vector<particle> particles;
+    std::vector<int> rem_particles;
 
     bool tick();
 
+    glm::mat4 GetSplashModel();
+
+    float getYhalfSphere();
+
+    void startAnimation();
+
 private:
+    int potential{};
+
+    float lastAnimationStartTime;
+
+    SplashState splashState = SplashState::WAIT;
+
     void update_particles(float dt);
 
     static particle new_particle();

@@ -6,6 +6,7 @@ uniform vec3 camera_position;
 uniform sampler2D albedo_texture;
 uniform sampler2D normal_texture;
 uniform sampler2D environment_texture;
+uniform float sphere_y_mid;
 
 in vec3 position;
 in vec3 tangent;
@@ -22,10 +23,6 @@ float CalcOpacity(vec3 normal, vec3 view_direction) {
     float R0 = pow((1 - n) / (1 + n), 2.0);
     float R = R0 + (1 - R0) * pow(1 - cos_theta, 5.0);
     return R;
-}
-
-bool sphere_condition() {
-    return position.y < 0;
 }
 
 void main()
@@ -60,7 +57,7 @@ void main()
 
     out_color = vec4(color, opacity);
 
-    if (sphere_condition()) { // SPHERE CONDITION
+    if (position.y < sphere_y_mid) { // SPHERE CONDITION
         albedo *= lightness;
         out_color = vec4(albedo, 1.0);
     }
