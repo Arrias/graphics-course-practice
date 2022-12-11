@@ -234,14 +234,14 @@ bool PState::tick() {
         view_azimuth += 2.f * dt;
 
     if (button_down[SDLK_t])
-        ambient_light += 0.001f;
+        ambient_light += 0.003f;
     if (button_down[SDLK_y])
-        ambient_light -= 0.001f;
+        ambient_light -= 0.003f;
 
     if (button_down[SDLK_u])
-        env_lightness += 0.001f;
+        env_lightness += 0.003f;
     if (button_down[SDLK_i])
-        env_lightness -= 0.001f;
+        env_lightness -= 0.003f;
 
     return true;
 }

@@ -390,10 +390,11 @@ int main() try {
         fog_shader.Set("camera_position", camera_position);
         fog_shader.Set("light_direction", light_direction);
         fog_shader.Set("model", glm::mat4(1.f));
+        fog_shader.Set("shadow_map", sun_texture_unit);
+        fog_shader.Set("transform", shadow_transform);
 
         glBindVertexArray(sphere_vao);
         glDrawElements(GL_TRIANGLES, sphere_index_count, GL_UNSIGNED_INT, nullptr);
-
 
         // *** Рисуем ball
         glEnable(GL_BLEND);
