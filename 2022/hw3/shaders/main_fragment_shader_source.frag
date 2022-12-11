@@ -69,7 +69,7 @@ void main() {
 
     float shadow_factor = 1.0;
     if (in_shadow_texture)
-    shadow_factor = factor;
+        shadow_factor = factor;
 
     if (is_wolf == 0) {
         vec3 albedo = texture(sampler, texcoord).xyz;
@@ -86,6 +86,6 @@ void main() {
         else
         albedo_color = color;
         float diffuse = max(0.0, dot(normalize(normal), sun_direction));
-        out_color = vec4(albedo_color.rgb * (real_ambient + diffuse), 1.0);
+        out_color = vec4(albedo_color.rgb * (real_ambient + diffuse) * shadow_factor, 1.0);
     }
 }

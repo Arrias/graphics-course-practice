@@ -34,6 +34,7 @@ void main() {
         texcoord = vec2(in_texcoord.x, in_texcoord.y);
     } else {
         gl_Position = projection * view * model * mat4(average) * vec4(in_position, 1.0);
+        position = (model * mat4(average) * vec4(in_position, 1.0)).xyz;
         normal = mat3(model) * mat3(average) * in_normal;
         texcoord = in_texcoord;
         weights = in_weights;

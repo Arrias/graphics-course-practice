@@ -306,7 +306,15 @@ int main() try {
     bool running = true;
     bool paused = false;
 
-    auto cow_model = glm::translate(glm::scale(glm::mat4(1.f), {0.5, 0.5, 0.5}), {0.f, 0.5f, 0.f});
+    auto cow_model = glm::translate(glm::scale(glm::mat4(1.f), {0.4, 0.4, 0.4}), {0.f, 0.5f, 0.f});
+
+    auto get_wolf_model_mat = [&](float time) {
+        auto wolf_model_mat = glm::scale(glm::mat4(1.f), {0.7, 0.7, 0.7});
+        wolf_model_mat = glm::translate(wolf_model_mat, {0.f, 0.f, wolf_len / 2.f});
+        wolf_model_mat = glm::rotate(wolf_model_mat, time, {0.f, 1.f, 0.f});
+        wolf_model_mat = glm::translate(glm::mat4(1.f), {-cos(time) * 0.7, 0.f, sin(time) * 0.7}) * wolf_model_mat;
+        return wolf_model_mat;
+    };
 
     auto draw_scene = [&](
             float far,
@@ -315,7 +323,8 @@ int main() try {
             glm::mat4x4 projection,
             glm::mat4x4 shadow_transform,
             glm::vec3 light_direction,
-            glm::vec3 camera_position
+            glm::vec3 camera_position,
+            const std::vector<glm::mat4x3> &bones
     ) {
         glBindVertexArray(cow_vao);
         glDisable(GL_BLEND);
@@ -347,35 +356,7 @@ int main() try {
 
         // WOLF
         main_shader.Set("is_wolf", (int) 1);
-        auto wolf_model_mat = glm::translate(glm::rotate(glm::mat4(1.f), time, {0.f, 0.f, 1.f}),
-                                             {sin(time), 0.f, cos(time)});
-
-        wolf_model_mat = glm::scale(glm::mat4(1.f), {0.7, 0.7, 0.7});
-        wolf_model_mat = glm::translate(wolf_model_mat, {0.f, 0.f, wolf_len / 2.f});
-        wolf_model_mat = glm::rotate(wolf_model_mat, time, {0.f, 1.f, 0.f});
-        wolf_model_mat = glm::translate(glm::mat4(1.f), {-cos(time) * 0.7, 0.f, sin(time) * 0.7}) * wolf_model_mat;
-
-        main_shader.Set("model", wolf_model_mat);
-
-        std::vector<glm::mat4x3> bones(wolf_model.bones.size());
-
-        // TASK 3
-        float frame_run = std::fmod(time, run_animation.max_time);
-
-        for (int i = 0; i < wolf_model.bones.size(); ++i) {
-            auto cur_translation = glm::translate(glm::mat4(1.f), run_animation.bones[i].translation(frame_run));
-            auto cur_scale = glm::scale(glm::mat4(1.f), run_animation.bones[i].scale(frame_run));
-            auto cur_rotation = glm::toMat4(run_animation.bones[i].rotation(frame_run));
-            auto cur_transform = cur_translation * cur_rotation * cur_scale;
-            if (wolf_model.bones[i].parent != -1) {
-                cur_transform = bones[wolf_model.bones[i].parent] * cur_transform;
-            }
-            bones[i] = cur_transform;
-        }
-        for (int i = 0; i < wolf_model.bones.size(); ++i) {
-            bones[i] = bones[i] * wolf_model.bones[i].inverse_bind_matrix;
-        }
-
+        main_shader.Set("model", get_wolf_model_mat(time));
         main_shader.Set("bones", bones.size(), bones.data());
 
         auto draw_meshes = [&](bool transparent) {
@@ -495,12 +476,23 @@ int main() try {
         if (button_down[SDLK_i])
             env_lightness -= 0.001f;
 
-//        if (button_down[SDLK_b])
-//            wolf_len += 0.1f;
-//        if (button_down[SDLK_n])
-//            wolf_len -= 0.1f;
-//
-//        std::cout << wolf_len << std::endl;
+        std::vector<glm::mat4x3> bones(wolf_model.bones.size());
+
+        float frame_run = std::fmod(time, run_animation.max_time);
+
+        for (int i = 0; i < wolf_model.bones.size(); ++i) {
+            auto cur_translation = glm::translate(glm::mat4(1.f), run_animation.bones[i].translation(frame_run));
+            auto cur_scale = glm::scale(glm::mat4(1.f), run_animation.bones[i].scale(frame_run));
+            auto cur_rotation = glm::toMat4(run_animation.bones[i].rotation(frame_run));
+            auto cur_transform = cur_translation * cur_rotation * cur_scale;
+            if (wolf_model.bones[i].parent != -1) {
+                cur_transform = bones[wolf_model.bones[i].parent] * cur_transform;
+            }
+            bones[i] = cur_transform;
+        }
+        for (int i = 0; i < wolf_model.bones.size(); ++i) {
+            bones[i] = bones[i] * wolf_model.bones[i].inverse_bind_matrix;
+        }
 
         float near = 0.1f;
         float far = 100.f;
@@ -536,6 +528,7 @@ int main() try {
 
             transform = GetSunShadowTransform(bbox.vertices, bbox.C, light_direction);
             shadow_shader.Use();
+            shadow_shader.Set("is_wolf", 0);
             shadow_shader.Set("transform", transform);
             shadow_shader.Set("model", cow_model);
             glBindVertexArray(cow_vao);
@@ -545,8 +538,25 @@ int main() try {
             glBindVertexArray(floor_vao);
             glDrawArrays(GL_TRIANGLE_FAN, 0, floor.size());
 
-            glDisable(GL_CULL_FACE);
+            shadow_shader.Set("is_wolf", 1);
+            shadow_shader.Set("bones", bones.size(), bones.data());
+            shadow_shader.Set("model", get_wolf_model_mat(time));
 
+            for (auto const &mesh: meshes) {
+                glBindVertexArray(mesh.vao);
+
+                if (mesh.material.two_sided)
+                    glDisable(GL_CULL_FACE);
+                else
+                    glEnable(GL_CULL_FACE);
+
+                glDrawElements(GL_TRIANGLES,
+                               mesh.indices.count,
+                               mesh.indices.type,
+                               reinterpret_cast<void *>(mesh.indices.view.offset));
+            }
+
+            glDisable(GL_CULL_FACE);
             glBindTexture(GL_TEXTURE_2D, shadow_map);
             glGenerateMipmap(GL_TEXTURE_2D);
         }
@@ -568,7 +578,7 @@ int main() try {
         glDrawArrays(GL_TRIANGLES, 0, 6);
 
         /// *** Рисуем сцену
-        draw_scene(far, model, view, projection, transform, light_direction, camera_position);
+        draw_scene(far, model, view, projection, transform, light_direction, camera_position, bones);
 
         /// *** Рисуем дебажный прямоугольник
         debug_shader.Use();
