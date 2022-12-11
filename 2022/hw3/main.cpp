@@ -343,8 +343,7 @@ int main() try {
 
         /// *** Рисуем снежинки
         glPointSize(5.f);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+        //glBlendFunc(GL_SRC_ALPHA, GL_ONE);
         //glDisable(GL_DEPTH_TEST);
         glBindVertexArray(snowflake_vao);
         glBindBuffer(GL_ARRAY_BUFFER, snowflake_vbo);
@@ -358,6 +357,8 @@ int main() try {
         snowflake_shader.Set("camera_position", camera_position);
         snowflake_shader.Set("sampler", (int) snowflake_texture.texture_unit);
         snowflake_shader.Set("snow", (int) snow_texture.texture_unit);
+        snowflake_shader.Set("shadow_map", (int) sun_texture_unit);
+        snowflake_shader.Set("transform", shadow_transform);
         glDrawArrays(GL_POINTS, 0, 4 * State.particles.size());
 
         // *** Рисуем ball

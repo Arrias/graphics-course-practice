@@ -7,6 +7,7 @@ uniform vec3 camera_position;
 layout (points) in ;
 layout (triangle_strip, max_vertices = 4) out ;
 out vec2 texcoord;
+out vec3 position;
 in float in_angle[];
 
 vec3 perp(vec3 v) {
@@ -35,6 +36,7 @@ void main()
         for (int j = 0; j < 2; ++j) {
             vec3 add = X * size * signs[i] + Y * size * signs[j];
             gl_Position = projection * view * model * vec4(center + add, 1.0);
+            position = (model * vec4(center+add, 1.0)).xyz;
             int n = 2 * i + j;
             texcoord = vec2(0.5, 0.5) + vec2(dx[n], dy[n]);
             EmitVertex();

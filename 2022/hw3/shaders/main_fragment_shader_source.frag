@@ -30,10 +30,10 @@ vec3 diffuse(vec3 direction, vec3 albedo) {
     return albedo * max(0.0, dot(normal, direction));
 }
 
-float C = 0.005;
+float GetShadowFactor() {
+    float C = 0.005;
+    float shadow_factor = 1.0;
 
-void main() {
-    // SUN SHADOW
     vec4 shadow_pos = transform * vec4(position, 1.0);
     shadow_pos /= shadow_pos.w;
     shadow_pos = shadow_pos * 0.5 + vec4(0.5);
@@ -41,35 +41,42 @@ void main() {
     (shadow_pos.y > 0) && (shadow_pos.y < 1) &&
     (shadow_pos.z > 0) && (shadow_pos.z < 1);
 
-    vec2 sum = vec2(0.0, 0.0);
-    int r = 3;
-    float sum_weight = 0;
+    if (in_shadow_texture) {
+        vec2 sum = vec2(0.0, 0.0);
+        int r = 3;
+        float sum_weight = 0;
 
-    for (int x = -r; x <= r; ++x) {
-        for (int y = -r; y <= r; ++y) {
-            float expo = exp(-(x * x + y * y) / 8.);
-            sum += expo * texture(shadow_map, shadow_pos.xy + vec2(x, y) / textureSize(shadow_map, 0).xy).rg;
-            sum_weight += expo;
+        for (int x = -r; x <= r; ++x) {
+            for (int y = -r; y <= r; ++y) {
+                float expo = exp(-(x * x + y * y) / 8.);
+                sum += expo * texture(shadow_map, shadow_pos.xy + vec2(x, y) / textureSize(shadow_map, 0).xy).rg;
+                sum_weight += expo;
+            }
         }
-    }
 
-    vec2 data = sum / sum_weight;
-    float mu = data.r;
-    float sigma = data.g - mu * mu;
-    float z = shadow_pos.z - C;
-    float factor = (z < mu) ? 1.0 :
-    sigma / (sigma + (z - mu) * (z - mu));
+        vec2 data = sum / sum_weight;
+        float mu = data.r;
+        float sigma = data.g - mu * mu;
+        float z = shadow_pos.z - C;
+        float factor = (z < mu) ? 1.0 :
+        sigma / (sigma + (z - mu) * (z - mu));
 
-    float l = 0.125;
-    if (factor < l) {
-        factor = 0.0;;
-    } else {
-        factor = (factor - l) / (1 - l);
-    }
+        float l = 0.125;
+        if (factor < l) {
+            factor = 0.0;;
+        } else {
+            factor = (factor - l) / (1 - l);
+        }
 
-    float shadow_factor = 1.0;
-    if (in_shadow_texture)
         shadow_factor = factor;
+    }
+    return shadow_factor;
+}
+
+void main() {
+    // SUN SHADOW
+
+    float shadow_factor = GetShadowFactor();
 
     if (is_wolf == 0) {
         vec3 albedo = texture(sampler, texcoord).xyz;

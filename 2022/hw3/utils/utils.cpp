@@ -249,7 +249,7 @@ PState::PState(int width, int height) : width(width), height(height) {}
 
 void PState::update_particles(float dt) {
     if (paused) return;
-    if (particles.size() < 512) {
+    if (particles.size() < 400) {
         particles.push_back(new_particle());
     }
 
@@ -275,7 +275,7 @@ particle PState::new_particle() {
     p.position.x = get_rnd(-0.8f, 0.8f);
     p.position.z = get_rnd(-sqrt(1 - p.position.x * p.position.x), sqrt(1 - p.position.x * p.position.x));
     p.position.y = sqrt(1 - p.position.x * p.position.x - p.position.z * p.position.z) - eps;
-    p.size = get_rnd(0.01, 0.02);
+    p.size = get_rnd(0.02, 0.04);
     p.speed = glm::vec3(get_rnd(0.01, 0.02), -get_rnd(0.1, 0.2), get_rnd(0.01, 0.02));
     p.angle = 0;
     p.angular_speed = get_rnd(0.1, 0.9);
