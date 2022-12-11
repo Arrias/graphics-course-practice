@@ -73,17 +73,41 @@ float GetShadowFactor() {
     return shadow_factor;
 }
 
+float less_root(float a, float b, float c) {
+    // ax^2 + bx + c = 0
+    float D = b * b - 4 * a * c;
+    return (-b - sqrt(D)) / (2 * a);
+}
+
+float intersect_bbox(vec3 origin, vec3 direction)
+{
+    float A = pow(direction.x, 2) + pow(direction.y, 2) + pow(direction.z, 2);
+    float B = 2 * dot(origin, direction);
+    float C = pow(origin.x, 2) + pow(origin.y, 2) + pow(origin.z, 2) - 1;
+    return less_root(A, B, C);
+}
+
 void main() {
     // SUN SHADOW
 
     float shadow_factor = GetShadowFactor();
+
+    vec3 dir = normalize(position - camera_position);
+    float t_max = length(position - camera_position);
+    float t_min = intersect_bbox(camera_position, dir);
+
+    if (t_min < 0) t_min = 0.0;
+    float absorption = 1;
+    float optical_depth = (t_max - t_min) * absorption;
+    float opacity = 1.0 - exp(-optical_depth);
+    opacity = 1.0;
 
     if (is_wolf == 0) {
         vec3 albedo = texture(sampler, texcoord).xyz;
         vec3 ambient = albedo * ambient_light;
         vec3 my_color = ambient;
         my_color += diffuse(sun_direction, albedo) * sun_color * shadow_factor;
-        out_color = vec4(my_color, 1.0);
+        out_color = vec4(my_color * opacity, 1.0);
     } else {
         float ambient_bias = 0.2;
         float real_ambient = ambient_light + ambient_bias;
@@ -93,6 +117,6 @@ void main() {
         else
         albedo_color = color;
         float diffuse = max(0.0, dot(normalize(normal), sun_direction));
-        out_color = vec4(albedo_color.rgb * (real_ambient + diffuse) * shadow_factor, 1.0);
+        out_color = vec4(albedo_color.rgb * (real_ambient + diffuse) * shadow_factor * opacity, 1.0);
     }
 }

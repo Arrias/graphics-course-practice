@@ -29,14 +29,20 @@ float vmax(vec3 v)
     return max(v.x, max(v.y, v.z));
 }
 
+vec2 solve(float a, float b, float c) {
+    // ax^2 + bx + c = 0
+    float D = b * b - 4 * a * c;
+    float x1 = (-b - sqrt(D)) / (2 * a);
+    float x2 = (-b + sqrt(D)) / (2 * a);
+    return vec2(x1, x2);
+}
+
 vec2 intersect_bbox(vec3 origin, vec3 direction)
 {
-    vec3 tmin = (bbox_min - origin) / direction;
-    vec3 tmax = (bbox_max - origin) / direction;
-    sort(tmin.x, tmax.x);
-    sort(tmin.y, tmax.y);
-    sort(tmin.z, tmax.z);
-    return vec2(vmax(tmin), vmin(tmax));
+    float A = pow(direction.x, 2) + pow(direction.y, 2) + pow(direction.z, 2);
+    float B = 2 * dot(origin, direction);
+    float C = pow(origin.x, 2) + pow(origin.y, 2) + pow(origin.z, 2) - 1;
+    return solve(A, B, C);
 }
 
 vec3 get_texture_pos(vec3 p) {
@@ -46,45 +52,17 @@ vec3 get_texture_pos(vec3 p) {
 const float PI = 3.1415926535;
 
 void main() {
+    if (position.y < 0) discard;
     vec3 from_camera = normalize(position - camera_position);
     vec2 seg = intersect_bbox(camera_position, from_camera);
+
     float tmin = seg.x;
     float tmax = seg.y;
     tmin = max(tmin, 0.0);
 
-    const int ITER = 64;
-    const int JTER = 8;
+    float absorption = 0.5f;
+    float optical_depth = (tmax - tmin) * absorption;
 
-    vec3 optical_depth = vec3(0.0);
-    float absorption = 3.0;
-    float dt = (tmax - tmin) / ITER;
-
-    // TASK 5
-    vec3 light_color = vec3(16.0);
-    vec3 color = vec3(0.0);
-    vec3 scattering = vec3(7.f, 1.f, 4.f);
-    vec3 extinction = absorption + scattering;
-    for (int i = 0; i < ITER; ++i) {
-        float t = tmin + (i + 0.5) * dt;
-        vec3 p = camera_position + t * from_camera;
-        float density = texture(sampler, get_texture_pos(p)).r;
-
-        optical_depth += extinction * density * dt;
-        vec3 light_optical_depth = vec3(0.0);
-        vec2 light_seg = intersect_bbox(p, light_direction);
-
-        float tmin_l = max(light_seg.x, 0.0);
-        float tmin_r = light_seg.y;
-        float dx_light = (tmin_r - tmin_l) / JTER;
-        for (int j = 0; j < JTER; ++j) {
-            float l = tmin_l + (j + 0.5) * dx_light;
-            vec3 l_p = p + l * light_direction;
-            light_optical_depth += extinction * texture(sampler, get_texture_pos(l_p)).r * dx_light;
-        }
-
-        color += light_color * exp(- light_optical_depth) * exp(- optical_depth) * dt * texture(sampler, get_texture_pos(p)).r * scattering / 4.0 / PI;
-    }
-
-    vec3 opacity = 1.0 - exp(-optical_depth);
-    out_color = vec4(color * opacity, 1.0);
+    float opacity = 1.0 - exp(-optical_depth);
+    out_color = vec4(1.0, 1.0, 1.0, opacity);
 }

@@ -103,3 +103,7 @@ BoundingBox CalcBoundingBox(const std::vector<std::vector<obj_data::vertex>> &da
 std::tuple<GLuint, GLuint, GLuint, int> GenSphereBuffers();
 
 std::tuple<GLuint, GLuint> GenSnowflakeBuffers();
+
+GLuint Load3dTexture(const std::string &path);
+
+std::tuple<GLuint, GLuint, GLuint, int> GenFogBuffers();

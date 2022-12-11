@@ -22,15 +22,14 @@ float GetShadowFactor() {
 
     if (in_shadow_texture) {
         float real_z = texture(shadow_map, shadow_pos.xy).r;
-
-        return 1.0 - 0.5 * float(real_z < gl_FragCoord.z);
+        return 1.0 - 0.5 * float(real_z < shadow_pos.z);
     }
 
     return 1.0;
 }
 
 float f(float x) {
-    return -4 * x * x + 4 * x;
+    return 1;
 }
 
 void main() {
@@ -43,4 +42,6 @@ void main() {
 
     float animation_factor = f(position.y);
     out_color = vec4(texture(snow, texcoord).rgb * shadow_factor, alpha * animation_factor);
+
+    out_color = vec4(vec3(1.f, 1.f, 1.f) * shadow_factor, alpha * animation_factor);
 }

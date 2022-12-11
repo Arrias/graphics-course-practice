@@ -19,7 +19,6 @@
 #include "gltf_loader.hpp"
 
 #include <rapiragl/rapiragl.h>
-#include <chrono>
 #include <iostream>
 #include <random>
 
@@ -179,6 +178,19 @@ int main() try {
             .geometry = std::nullopt
     });
 
+    /// *** Туман
+    auto fog_shader = Shader::GenShader(Shader::ShaderPaths{
+            .vertex = FilePath{root + "/shaders/fog_vertex_shader_source.vert"},
+            .fragment = FilePath{root + "/shaders/fog_fragment_shader_source.frag"},
+            .geometry = std::nullopt
+    });
+
+    GLuint fog_vao, fog_vbo, fog_ebo;
+    int cube_size;
+    std::tie(fog_vao, fog_vbo, fog_ebo, cube_size) = GenFogBuffers();
+    auto fog_texture = Load3dTexture(root + "/cloud.data");
+
+    /////////////////////////////
     GLuint debug_vao;
     glGenVertexArrays(1, &debug_vao);
 
@@ -259,6 +271,9 @@ int main() try {
         wolf_model_mat = glm::translate(glm::mat4(1.f), {-cos(time) * 0.7, 0.f, sin(time) * 0.7}) * wolf_model_mat;
         return wolf_model_mat;
     };
+
+    const glm::vec3 cloud_bbox_min{-2.f, -1.f, -1.f};
+    const glm::vec3 cloud_bbox_max{2.f, 1.f, 1.f};
 
     auto draw_scene = [&](
             float far,
@@ -360,6 +375,25 @@ int main() try {
         snowflake_shader.Set("shadow_map", (int) sun_texture_unit);
         snowflake_shader.Set("transform", shadow_transform);
         glDrawArrays(GL_POINTS, 0, 4 * State.particles.size());
+
+        // *** Рисуем туман
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_FRONT);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        fog_shader.Use();
+        fog_shader.Set("view", view);
+        fog_shader.Set("projection", projection);
+        fog_shader.Set("bbox_min", cloud_bbox_min);
+        fog_shader.Set("bbox_max", cloud_bbox_max);
+        fog_shader.Set("camera_position", camera_position);
+        fog_shader.Set("light_direction", light_direction);
+        fog_shader.Set("model", glm::mat4(1.f));
+
+        glBindVertexArray(sphere_vao);
+        glDrawElements(GL_TRIANGLES, sphere_index_count, GL_UNSIGNED_INT, nullptr);
+
 
         // *** Рисуем ball
         glEnable(GL_BLEND);
