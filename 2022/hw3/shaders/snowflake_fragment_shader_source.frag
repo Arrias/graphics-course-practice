@@ -28,20 +28,15 @@ float GetShadowFactor() {
     return 1.0;
 }
 
-float f(float x) {
-    return 1;
-}
-
 void main() {
     float dx = texcoord.x - 0.5;
     float dy = texcoord.y - 0.5;
 
     float shadow_factor = GetShadowFactor();
-    float alpha = exp(-(dx * dx + dy * dy) * 25);
+    float alpha = texture(sampler, texcoord).r;// exp(-(dx * dx + dy * dy) * 25);
     if (alpha < 0.5) discard;
 
-    float animation_factor = f(position.y);
-    out_color = vec4(texture(snow, texcoord).rgb * shadow_factor, alpha * animation_factor);
+    out_color = vec4(texture(snow, texcoord).rgb * shadow_factor, alpha);
 
-    out_color = vec4(vec3(1.f, 1.f, 1.f) * shadow_factor, alpha * animation_factor);
+    out_color = vec4(vec3(1.f, 1.f, 1.f) * shadow_factor, alpha);
 }

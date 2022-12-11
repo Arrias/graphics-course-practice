@@ -26,6 +26,7 @@ using Shader = rapiragl::components::Shader;
 using TextureLoader = rapiragl::components::TextureLoader;
 
 const auto wolf_len = 0.2f;
+bool DEBUG = false;
 
 int main() try {
     // *** init window
@@ -38,7 +39,7 @@ int main() try {
     int width_, height_;
     SDL_GetWindowSize(window, &width_, &height_);
     auto State = PState(width_, height_);
-    std::string root = "/home/rapiralove/studying/graphics-course-practice/2022/hw3";
+    std::string root = PROJECT_ROOT;
 
     // *** создаем шейдеры сцены
     auto sphere_shader = Shader::GenShader(
@@ -72,6 +73,10 @@ int main() try {
     auto environment_texture = TextureLoader_.GetTexture(FilePath{root + "/textures/environment_map.jpg"},
                                                          SetTextureSettings);
     auto snow_texture = TextureLoader_.GetTexture(FilePath{root + "/textures/snow.jpeg"});
+    auto particle_texture = TextureLoader_.GetTexture(FilePath{root + "/textures/particle.png"}, []() {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    });
 
     /// *** Грузим корову TODO: сделать нормально
     auto cow = parse_obj(root + "/cow/cow.obj");
@@ -353,7 +358,7 @@ int main() try {
         glDepthMask(GL_TRUE);
 
         /// *** Рисуем снежинки
-        glPointSize(5.f);
+        glPointSize(1.f);
         //glBlendFunc(GL_SRC_ALPHA, GL_ONE);
         //glDisable(GL_DEPTH_TEST);
         glBindVertexArray(snowflake_vao);
@@ -366,7 +371,7 @@ int main() try {
         snowflake_shader.Set("view", view);
         snowflake_shader.Set("projection", projection);
         snowflake_shader.Set("camera_position", camera_position);
-        snowflake_shader.Set("sampler", (int) snowflake_texture.texture_unit);
+        snowflake_shader.Set("sampler", (int) particle_texture.texture_unit);
         snowflake_shader.Set("snow", (int) snow_texture.texture_unit);
         snowflake_shader.Set("shadow_map", (int) sun_texture_unit);
         snowflake_shader.Set("transform", shadow_transform);
@@ -522,10 +527,12 @@ int main() try {
         draw_scene(far, model, view, projection, transform, light_direction, camera_position, bones);
 
         /// *** Рисуем дебажный прямоугольник
-        debug_shader.Use();
-        debug_shader.Set("sampler", sun_texture_unit);
-        glBindVertexArray(debug_vao);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+        if (DEBUG) {
+            debug_shader.Use();
+            debug_shader.Set("sampler", sun_texture_unit);
+            glBindVertexArray(debug_vao);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
 
         SDL_GL_SwapWindow(window);
     }
