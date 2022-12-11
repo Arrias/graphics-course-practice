@@ -3,9 +3,22 @@
 #include <SDL2/SDL_video.h>
 #include <SDL2/SDL.h>
 #include <complex>
+#include <random>
 #include "utils.h"
 #include "stb_image.h"
 #include "glm/ext/scalar_constants.hpp"
+
+namespace {
+
+std::default_random_engine rng;
+
+float get_rnd(float l, float r) {
+    return std::uniform_real_distribution{l, r}(rng);
+};
+
+const float eps = 0.01;
+
+}
 
 std::string to_string(std::string_view str) {
     return std::string(str.begin(), str.end());
@@ -136,4 +149,185 @@ glm::mat4 GetSunShadowTransform(const std::vector<glm::vec3> &bounding_box, cons
                                           {dz * light_z.x, dz * light_z.y, dz * light_z.z, 0.f},
                                           {C.x,            C.y,            C.z,            1.f}
                                   }));
+}
+
+
+BoundingBox CalcBoundingBox(const std::vector<std::vector<obj_data::vertex>> &dats) {
+    const auto INF = std::numeric_limits<float>::max();
+
+    float x[] = {INF, -INF};
+    float y[] = {INF, -INF};
+    float z[] = {INF, -INF};
+
+    for (const auto &dat: dats) {
+        for (const auto &ver: dat) {
+            x[0] = std::min(x[0], ver.position[0]);
+            y[0] = std::min(y[0], ver.position[1]);
+            z[0] = std::min(z[0], ver.position[2]);
+
+            x[1] = std::max(x[1], ver.position[0]);
+            y[1] = std::max(y[1], ver.position[1]);
+            z[1] = std::max(z[1], ver.position[2]);
+        }
+    }
+
+    auto C = glm::vec3{(x[0] + x[1]) / 2.f, (y[0] + y[1]) / 2.f, (z[0] + z[1]) / 2.f};
+    std::vector<glm::vec3> vertices;
+    for (int i = 0; i < 2; ++i) {
+        for (int j = 0; j < 2; ++j) {
+            for (int k = 0; k < 2; ++k) {
+                vertices.emplace_back(x[i], y[j], z[k]);
+            }
+        }
+    }
+    return BoundingBox{
+            .vertices = vertices,
+            .C = C
+    };
+}
+
+bool PState::tick() {
+    for (SDL_Event event; SDL_PollEvent(&event);)
+        switch (event.type) {
+            case SDL_QUIT:
+                running = false;
+                break;
+            case SDL_WINDOWEVENT:
+                switch (event.window.event) {
+                    case SDL_WINDOWEVENT_RESIZED:
+                        width = event.window.data1;
+                        height = event.window.data2;
+                        glViewport(0, 0, width, height);
+                        break;
+                }
+                break;
+
+            case SDL_KEYDOWN:
+                button_down[event.key.keysym.sym] = true;
+                if (event.key.keysym.sym == SDLK_SPACE)
+                    paused = !paused;
+                break;
+            case SDL_KEYUP:
+                button_down[event.key.keysym.sym] = false;
+                break;
+        }
+
+    if (!running) return false;
+
+    auto now = std::chrono::high_resolution_clock::now();
+    float dt = std::chrono::duration_cast<std::chrono::duration<float>>(now - last_frame).count();
+
+    update_particles(dt);
+    last_frame = now;
+
+    if (!paused) time += dt;
+
+    if (button_down[SDLK_UP])
+        camera_distance -= 4.f * dt;
+    if (button_down[SDLK_DOWN])
+        camera_distance += 4.f * dt;
+
+    if (button_down[SDLK_LEFT])
+        view_azimuth -= 2.f * dt;
+    if (button_down[SDLK_RIGHT])
+        view_azimuth += 2.f * dt;
+
+    if (button_down[SDLK_t])
+        ambient_light += 0.001f;
+    if (button_down[SDLK_y])
+        ambient_light -= 0.001f;
+
+    if (button_down[SDLK_u])
+        env_lightness += 0.001f;
+    if (button_down[SDLK_i])
+        env_lightness -= 0.001f;
+
+    return true;
+}
+
+PState::PState(int width, int height) : width(width), height(height) {}
+
+void PState::update_particles(float dt) {
+    if (paused) return;
+    if (particles.size() < 512) {
+        particles.push_back(new_particle());
+    }
+
+    float A = 0.5;
+    float C = 2;
+    float D = 0.2;
+    float maxY = 0.3f;
+    for (auto &p: particles) {
+        p.speed.y -= dt * A;
+        p.position += p.speed * dt;
+        p.speed *= exp(-C * dt);
+        p.size *= exp(-D * dt);
+        p.angle += p.angular_speed * dt;
+
+        if (p.position.y < eps) {
+            p = new_particle();
+        }
+    }
+}
+
+particle PState::new_particle() {
+    particle p{};
+    p.position.x = get_rnd(-0.8f, 0.8f);
+    p.position.z = get_rnd(-sqrt(1 - p.position.x * p.position.x), sqrt(1 - p.position.x * p.position.x));
+    p.position.y = sqrt(1 - p.position.x * p.position.x - p.position.z * p.position.z) - eps;
+    p.size = get_rnd(0.01, 0.02);
+    p.speed = glm::vec3(get_rnd(0.01, 0.02), -get_rnd(0.1, 0.2), get_rnd(0.01, 0.02));
+    p.angle = 0;
+    p.angular_speed = get_rnd(0.1, 0.9);
+    return p;
+}
+
+std::tuple<GLuint, GLuint, GLuint, int> GenSphereBuffers() {
+    GLuint sphere_vao, sphere_vbo, sphere_ebo;
+    glGenVertexArrays(1, &sphere_vao);
+    glBindVertexArray(sphere_vao);
+    glGenBuffers(1, &sphere_vbo);
+    glGenBuffers(1, &sphere_ebo);
+    GLuint sphere_index_count;
+    {
+        auto [vertices, indices] = generate_sphere(1.f, 16);
+
+        glBindBuffer(GL_ARRAY_BUFFER, sphere_vbo);
+        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(vertices[0]), vertices.data(), GL_STATIC_DRAW);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sphere_ebo);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(indices[0]), indices.data(), GL_STATIC_DRAW);
+
+        sphere_index_count = indices.size();
+    }
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *) offsetof(vertex, position));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *) offsetof(vertex, tangent));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *) offsetof(vertex, normal));
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *) offsetof(vertex, texcoords));
+
+    return std::tuple(sphere_vao, sphere_vbo, sphere_ebo, sphere_index_count);
+}
+
+std::tuple<GLuint, GLuint> GenSnowflakeBuffers() {
+    GLuint vao, vbo;
+    glGenVertexArrays(1, &vao);
+    glBindVertexArray(vao);
+
+    glGenBuffers(1, &vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(particle), (void *) (0));
+
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, sizeof(particle), (void *) 12);
+
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(particle), (void *) 28);
+
+    return {vao, vbo};
 }
