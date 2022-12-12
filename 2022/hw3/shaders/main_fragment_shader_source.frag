@@ -76,7 +76,9 @@ float GetShadowFactor() {
 float less_root(float a, float b, float c) {
     // ax^2 + bx + c = 0
     float D = b * b - 4 * a * c;
-    return (-b - sqrt(D)) / (2 * a);
+    float x1 = (-b - sqrt(D)) / (2 * a);
+    float x2 = (-b + sqrt(D)) / (2 * a);
+    return min(x1, x2);
 }
 
 float intersect_bbox(vec3 origin, vec3 direction)
