@@ -67,9 +67,14 @@ in vec2 texcoord;
 
 uniform float sdf_scale;
 uniform sampler2D sdf_texture;
+uniform float v;
 
 float median(vec3 v) {
     return max(min(v.r, v.g), min(max(v.r, v.g), v.b));
+}
+
+float f(float x) {
+    return x * x * (1 - 0.5 * x);
 }
 
 void main()
@@ -79,12 +84,14 @@ void main()
     float value = length(vec2(dFdx(sdfValue), dFdy(sdfValue)))/sqrt(2.0);
     float alpha = smoothstep(-value, value, sdfValue);
 
-    float eps = 0.23;
+    float shifted = sdfValue + v;
+    float shifted_value = length(vec2(dFdx(shifted), dFdy(shifted)))/sqrt(2.0);
+    float shifted_smooth = smoothstep(-shifted_value, shifted_value, shifted);
 
-    out_color = vec4(0.0, 0.0, 0.0, alpha);
-    if (abs(sdfValue) <= eps) {
-        out_color = vec4(1.0, 1.0, 1.0, 1.0);
-    }
+    out_color = vec4(1-alpha, 1-alpha, 1-alpha, shifted_smooth);
+//    if (alpha < 1.0) {
+//        out_color = vec4(1-f(shifted_smooth), 1-f(shifted_smooth), 1-f(shifted_smooth), shifted_smooth);
+//    }
 }
 )";
 
@@ -222,7 +229,8 @@ int main() try {
     std::string text = "Hello, world!";
     bool text_changed = true;
 
-    float scale = 1.f;
+    float scale = 20.f;
+    float v = 0.77;
 
     bool running = true;
     while (running) {
@@ -241,15 +249,23 @@ int main() try {
                     }
                     break;
                 case SDL_KEYDOWN:
+                    if (event.key.keysym.sym == SDLK_v) {
+                        v += 0.01;
+                        std::cout << v << std::endl;
+                    }
+                    if (event.key.keysym.sym == SDLK_b) {
+                        v -= 0.01;
+                        std::cout << v << std::endl;
+                    }
                     button_down[event.key.keysym.sym] = true;
                     if (event.key.keysym.sym == SDLK_BACKSPACE && !text.empty()) {
                         text.pop_back();
                         text_changed = true;
                     }
                     break;
-                case SDL_TEXTINPUT:
-                    text.append(event.text.text);
-                    text_changed = true;
+//                case SDL_TEXTINPUT:
+//                    text.append(event.text.text);
+//                    text_changed = true;
                 case SDL_KEYUP:
                     button_down[event.key.keysym.sym] = false;
                     break;
@@ -330,6 +346,7 @@ int main() try {
         glUseProgram(msdf_program);
         glUniformMatrix4fv(transform_location, 1, GL_FALSE, reinterpret_cast<const GLfloat *>(&transform));
         glUniform1f(sdf_scale_location, font.sdf_scale);
+        glUniform1f(glGetUniformLocation(msdf_program, "v"), v);
         glBindVertexArray(vao);
         glDrawArrays(GL_TRIANGLES, 0, vertices.size());
 
