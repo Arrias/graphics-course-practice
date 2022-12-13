@@ -39,7 +39,7 @@ vec2 solve(float a, float b, float c) {
     float D = b * b - 4 * a * c;
     float x1 = (-b - sqrt(D)) / (2 * a);
     float x2 = (-b + sqrt(D)) / (2 * a);
-    return vec2(x1, x2);
+    return vec2(min(x1, x2), max(x1, x2));
 }
 
 vec2 intersect_bbox(vec3 origin, vec3 direction)
